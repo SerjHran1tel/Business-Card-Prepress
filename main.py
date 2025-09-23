@@ -1,32 +1,23 @@
-from image_utils import scan_images
-from layout import make_layout_pdf
+import sys
+import os
+
+# Добавляем путь к модулям
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 def main():
-    folder = "Pictures"
-    print(f"Scanning folder: {folder}")
-    infos, errors = scan_images(folder)
-
-    print("\nImages found:")
-    image_files = []
-    for info in infos:
-        print(f"{info['filename']}: {info['format']}, size={info['size']}, mode={info['mode']}")
-        image_files.append(f"{folder}/{info['filename']}")
-
-    if errors:
-        print("\nErrors:")
-        for err in errors:
-            print(f"{err['filename']}: {err['error']}")
-    else:
-        print("\nNo errors found.")
-
-    if image_files:
-        # Генерируем PDF-раскладку по первым N изображениям
-        print("\nGenerating layout PDF...")
-        out_pdf = "business_cards_layout.pdf"
-        make_layout_pdf(image_files[:10], out_pdf)
-        print(f"PDF saved as {out_pdf}")
-    else:
-        print("No images for layout.")
+    """Главная функция приложения"""
+    try:
+        from gui import main as gui_main
+        print("Запуск графического интерфейса...")
+        gui_main()
+    except ImportError as e:
+        print(f"Ошибка импорта: {e}")
+        print("Убедитесь, что установлены все зависимости:")
+        print("pip install -r requirements.txt")
+        input("Нажмите Enter для выхода...")
+    except Exception as e:
+        print(f"Неожиданная ошибка: {e}")
+        input("Нажмите Enter для выхода...")
 
 if __name__ == "__main__":
     main()
