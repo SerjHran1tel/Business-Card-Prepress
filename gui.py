@@ -196,6 +196,75 @@ class ImpositionApp:
         self.preview_frame.bind("<Configure>", lambda e: self.canvas.configure(
             scrollregion=self.canvas.bbox("all")))
 
+    def draw_preview(self):
+        """Нарисовать графический предпросмотр раскладки"""
+        # Очищаем предыдущий предпросмотр
+        for widget in self.preview_frame.winfo_children():
+            widget.destroy()
+
+        sheet_w, sheet_h = self.config.get_sheet_dimensions()
+        card_w, card_h = self.config.get_card_dimensions()
+
+        calculator = LayoutCalculator(
+            sheet_w, sheet_h, card_w, card_h,
+            self.config.margin, self.config.bleed, self.config.rotate_cards
+        )
+
+        layout = calculator.calculate_layout()
+
+        if layout['cards_total'] == 0:
+            ttk.Label(self.preview_frame, text="Визитки не помещаются на лист!",
+                      foreground="red", font=("Arial", 12)).pack(pady=20)
+            return
+
+        # Создаем canvas для рисования с фиксированным размером
+        canvas_width = 600
+        canvas_height = 400
+        preview_canvas = tk.Canvas(self.preview_frame,
+                                   width=canvas_width,
+                                   height=canvas_height,
+                                   bg='white', relief='sunken', bd=1)
+        preview_canvas.pack(pady=10)
+
+        # Масштаб для отображения
+        scale_x = (canvas_width - 40) / sheet_w
+        scale_y = (canvas_height - 40) / sheet_h
+        scale = min(scale_x, scale_y) * 0.9  # Оставляем отступы
+
+        # Центрируем рисунок
+        offset_x = (canvas_width - sheet_w * scale) / 2
+        offset_y = (canvas_height - sheet_h * scale) / 2
+
+        # Рисуем лист
+        preview_canvas.create_rectangle(
+            offset_x, offset_y,
+            offset_x + sheet_w * scale,
+            offset_y + sheet_h * scale,
+            outline='black', width=2, fill='#f8f8f8'
+        )
+
+        # Рисуем визитки
+        for i, pos in enumerate(layout['positions']):
+            x1 = offset_x + pos['x'] * scale
+            y1 = offset_y + pos['y'] * scale
+            x2 = x1 + pos['width'] * scale
+            y2 = y1 + pos['height'] * scale
+
+            color = 'lightblue' if not pos['rotated'] else 'lightgreen'
+            preview_canvas.create_rectangle(x1, y1, x2, y2, outline='blue', width=1, fill=color)
+
+            # Номер визитки
+            preview_canvas.create_text(x1 + 5, y1 + 5, text=str(i + 1),
+                                       anchor='nw', font=('Arial', 8), fill='darkblue')
+
+        # Информация под canvas
+        info_text = f"Лист: {sheet_w}×{sheet_h} мм\n" \
+                    f"Визитки: {layout['cards_x']}×{layout['cards_y']} = {layout['cards_total']} шт.\n" \
+                    f"Поворот: {'Да' if layout['rotated'] else 'Нет'}\n" \
+                    f"Эффективность: {layout['efficiency']:.1%}"
+
+        ttk.Label(self.preview_frame, text=info_text, font=('Courier', 10), justify='left').pack(pady=5)
+
     def select_front_folder(self):
         folder = filedialog.askdirectory(title="Выберите папку с лицевыми сторонами")
         if folder:
