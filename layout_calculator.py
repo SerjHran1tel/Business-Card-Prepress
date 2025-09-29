@@ -1,21 +1,21 @@
 class LayoutCalculator:
     def __init__(self, sheet_width, sheet_height, card_width, card_height,
-                 margin, bleed, rotate=False):
+                 margin, bleed, gutter, rotate=False):
         self.sheet_width = sheet_width
         self.sheet_height = sheet_height
         self.card_width = card_width
         self.card_height = card_height
         self.margin = margin
         self.bleed = bleed
+        self.gutter = gutter  # NEW
         self.rotate = rotate
 
-        # Рабочая область с учетом полей и вылетов
-        self.work_width = sheet_width - 2 * margin + 2 * bleed
-        self.work_height = sheet_height - 2 * margin + 2 * bleed
+        # Рабочая область: sheet - 2*margin (без +bleed, т.к. bleed теперь в effective_card)
+        self.work_width = sheet_width - 2 * margin
+        self.work_height = sheet_height - 2 * margin
 
     def calculate_layout(self):
         """Рассчитать оптимальную раскладку"""
-        # Пробуем оба варианта: обычный и повернутый
         layouts = []
 
         # Без поворота
@@ -29,7 +29,6 @@ class LayoutCalculator:
             if rotated_layout['cards_total'] > 0:
                 layouts.append(rotated_layout)
 
-        # Выбираем лучшую раскладку
         if not layouts:
             return self._get_empty_layout()
 
@@ -39,39 +38,43 @@ class LayoutCalculator:
     def _calculate_single_layout(self, rotated):
         """Рассчитать раскладку для одного варианта"""
         if rotated:
-            card_w, card_h = self.card_height, self.card_width  # Меняем местами
+            card_w, card_h = self.card_height, self.card_width
         else:
             card_w, card_h = self.card_width, self.card_height
 
-        # Проверяем, помещается ли хотя бы одна визитка
-        if card_w > self.work_width or card_h > self.work_height:
+        # Effective размер с bleed и gutter
+        effective_w = card_w + 2 * self.bleed + self.gutter
+        effective_h = card_h + 2 * self.bleed + self.gutter
+
+        if self.work_width < card_w + 2 * self.bleed or self.work_height < card_h + 2 * self.bleed:
             return self._get_empty_layout()
 
-        # Рассчитываем количество визиток
-        cards_x = int(self.work_width // card_w)
-        cards_y = int(self.work_height // card_h)
+        # Рассчитываем количество визиток с учетом gutters между ними
+        cards_x = int((self.work_width + self.gutter) // effective_w)
+        cards_y = int((self.work_height + self.gutter) // effective_h)
 
         if cards_x == 0 or cards_y == 0:
             return self._get_empty_layout()
 
-        # Рассчитываем отступы для центрирования
-        total_width = cards_x * card_w
-        total_height = cards_y * card_h
+        # Total размер с gutters (но без gutter на краях)
+        total_width = cards_x * (card_w + 2 * self.bleed) + (cards_x - 1) * self.gutter
+        total_height = cards_y * (card_h + 2 * self.bleed) + (cards_y - 1) * self.gutter
 
-        offset_x = (self.work_width - total_width) / 2 + self.margin - self.bleed
-        offset_y = (self.work_height - total_height) / 2 + self.margin - self.bleed
+        # Отступы для центрирования
+        offset_x = self.margin + (self.work_width - total_width) / 2
+        offset_y = self.margin + (self.work_height - total_height) / 2
 
-        # Генерируем позиции для каждой визитки
+        # Генерируем позиции
         positions = []
         for y in range(cards_y):
             for x in range(cards_x):
-                pos_x = offset_x + x * card_w
-                pos_y = offset_y + y * card_h
+                pos_x = offset_x + x * (card_w + 2 * self.bleed + self.gutter) - self.bleed
+                pos_y = offset_y + y * (card_h + 2 * self.bleed + self.gutter) - self.bleed
                 positions.append({
                     'x': pos_x,
                     'y': pos_y,
-                    'width': card_w,
-                    'height': card_h,
+                    'width': card_w + 2 * self.bleed,
+                    'height': card_h + 2 * self.bleed,
                     'rotated': rotated
                 })
 
@@ -81,7 +84,7 @@ class LayoutCalculator:
             'cards_total': cards_x * cards_y,
             'positions': positions,
             'rotated': rotated,
-            'efficiency': (total_width * total_height) / (self.work_width * self.work_height)
+            'efficiency': (cards_x * card_w * cards_y * card_h) / (self.sheet_width * self.sheet_height)  # UPDATED: эффективность без bleed/gutter в numerator
         }
 
     def _get_empty_layout(self):

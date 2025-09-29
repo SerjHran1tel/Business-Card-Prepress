@@ -1,20 +1,7 @@
-import os
 from PIL import Image
+import os
 
 SUPPORTED_FORMATS = ('.jpg', '.jpeg', '.png', '.tiff', '.bmp', '.tif', '.webp')
-
-
-def list_image_files(folder):
-    """Получить список изображений в папке"""
-    if not folder or not os.path.exists(folder):
-        return []
-
-    files = []
-    for filename in os.listdir(folder):
-        if filename.lower().endswith(SUPPORTED_FORMATS):
-            files.append(os.path.join(folder, filename))
-    return sorted(files)  # Сортируем для предсказуемости
-
 
 def get_image_info(filepath):
     """Получить информацию об изображении"""
@@ -34,14 +21,22 @@ def get_image_info(filepath):
             'path': filepath
         }
 
+def scan_images(file_list):
+    """Просканировать список файлов изображений"""
+    if not file_list:
+        return [], []
 
-def scan_images(folder):
-    """Просканировать папку с изображениями"""
-    files = list_image_files(folder)
     infos = []
     errors = []
 
-    for f in files:
+    for f in file_list:
+        if not os.path.exists(f) or not f.lower().endswith(SUPPORTED_FORMATS):
+            errors.append({
+                'filename': os.path.basename(f),
+                'error': 'Файл не существует или неподдерживаемый формат',
+                'path': f
+            })
+            continue
         info = get_image_info(f)
         if 'error' in info:
             errors.append(info)
@@ -49,7 +44,6 @@ def scan_images(folder):
             infos.append(info)
 
     return infos, errors
-
 
 def validate_image_pairs(front_infos, back_infos):
     """Проверить соответствие лицевых и оборотных сторон"""
@@ -64,11 +58,9 @@ def validate_image_pairs(front_infos, back_infos):
     if back_count == 0:
         warnings.append("Не найдено оборотных сторон (будет создана односторонняя раскладка)")
 
-    # Проверяем соответствие по количеству
     if front_count != back_count and back_count > 0:
         warnings.append(f"Несоответствие количества: {front_count} лиц vs {back_count} рубашек")
 
-    # Проверяем размеры изображений
     for i, front in enumerate(front_infos):
         if back_count > i:
             back = back_infos[i]

@@ -14,7 +14,6 @@ CARD_SIZES = {
     'Произвольный': None
 }
 
-
 class PrintConfig:
     def __init__(self):
         self.sheet_size = 'A4'
@@ -23,10 +22,11 @@ class PrintConfig:
         self.custom_card_height = 50
         self.margin = 5
         self.bleed = 3
+        self.gutter = 0
         self.rotate_cards = False
         self.add_crop_marks = True
-        self.front_folder = ''
-        self.back_folder = ''
+        self.front_files = []  # NEW: список путей к файлам лицевых сторон
+        self.back_files = []   # NEW: список путей к файлам оборотных сторон
 
     def get_sheet_dimensions(self):
         return SHEET_SIZES.get(self.sheet_size, (210, 297))

@@ -20,7 +20,6 @@ class ImpositionApp:
         self.front_images = []
         self.back_images = []
 
-        # Создаем иконку (если есть PIL)
         try:
             img = Image.new('RGB', (1, 1), color='white')
             self.icon = ImageTk.PhotoImage(img)
@@ -33,56 +32,50 @@ class ImpositionApp:
 
     def setup_ui(self):
         """Настройка пользовательского интерфейса"""
-        # Создаем панель вкладок
         notebook = ttk.Notebook(self.root)
         notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Вкладка основных настроек
         main_frame = ttk.Frame(notebook, padding=10)
         notebook.add(main_frame, text="Основные настройки")
 
-        # Вкладка предпросмотра
         preview_frame = ttk.Frame(notebook)
         notebook.add(preview_frame, text="Предпросмотр")
 
         self.setup_main_tab(main_frame)
         self.setup_preview_tab(preview_frame)
 
-        # Статус бар
         self.status_var = tk.StringVar(value="Готов к работе")
         status_bar = ttk.Label(self.root, textvariable=self.status_var, relief="sunken")
         status_bar.pack(fill=tk.X, side=tk.BOTTOM)
 
     def setup_main_tab(self, parent):
         """Настройка основной вкладки"""
-        # Сетка для выравнивания
         parent.columnconfigure(1, weight=1)
 
         row = 0
 
-        # Заголовок
         title = ttk.Label(parent, text="Раскладка визиток для печати",
                           font=("Arial", 16, "bold"))
         title.grid(row=row, column=0, columnspan=3, pady=(0, 20))
         row += 1
 
-        # Папки с изображениями
-        folder_frame = ttk.LabelFrame(parent, text="Папки с изображениями", padding=10)
+        folder_frame = ttk.LabelFrame(parent, text="Файлы изображений", padding=10)  # UPDATED: текст
         folder_frame.grid(row=row, column=0, columnspan=3, sticky="we", pady=5)
         folder_frame.columnconfigure(1, weight=1)
         row += 1
 
         ttk.Label(folder_frame, text="Лицевые стороны:").grid(row=0, column=0, sticky="w", pady=2)
-        self.front_entry = ttk.Entry(folder_frame, textvariable=tk.StringVar(value=self.config.front_folder))
+        self.front_entry = ttk.Entry(folder_frame)
         self.front_entry.grid(row=0, column=1, sticky="we", padx=5)
-        ttk.Button(folder_frame, text="Обзор", command=self.select_front_folder).grid(row=0, column=2)
+        self.front_entry.configure(state='readonly')  # NEW: только для чтения
+        ttk.Button(folder_frame, text="Обзор", command=self.select_front_files).grid(row=0, column=2)  # UPDATED: select_front_files
 
         ttk.Label(folder_frame, text="Оборотные стороны:").grid(row=1, column=0, sticky="w", pady=2)
-        self.back_entry = ttk.Entry(folder_frame, textvariable=tk.StringVar(value=self.config.back_folder))
+        self.back_entry = ttk.Entry(folder_frame)
         self.back_entry.grid(row=1, column=1, sticky="we", padx=5)
-        ttk.Button(folder_frame, text="Обзор", command=self.select_back_folder).grid(row=1, column=2)
+        self.back_entry.configure(state='readonly')  # NEW: только для чтения
+        ttk.Button(folder_frame, text="Обзор", command=self.select_back_files).grid(row=1, column=2)  # UPDATED: select_back_files
 
-        # Параметры печати
         print_frame = ttk.LabelFrame(parent, text="Параметры печати", padding=10)
         print_frame.grid(row=row, column=0, columnspan=3, sticky="we", pady=5)
         print_frame.columnconfigure(1, weight=1)
@@ -100,7 +93,6 @@ class ImpositionApp:
         self.card_combo.grid(row=1, column=1, sticky="w", pady=2)
         self.card_combo.bind('<<ComboboxSelected>>', self.on_config_change)
 
-        # Произвольный размер визитки
         self.custom_size_frame = ttk.Frame(print_frame)
         self.custom_size_frame.grid(row=2, column=0, columnspan=3, sticky="w", pady=2)
 
@@ -118,7 +110,6 @@ class ImpositionApp:
 
         ttk.Label(self.custom_size_frame, text="мм").pack(side=tk.LEFT)
 
-        # Дополнительные параметры
         ttk.Label(print_frame, text="Поля:").grid(row=3, column=0, sticky="w", pady=2)
         self.margin_spin = ttk.Spinbox(print_frame, from_=0, to=50, width=5)
         self.margin_spin.set(self.config.margin)
@@ -133,9 +124,15 @@ class ImpositionApp:
         self.bleed_spin.bind('<KeyRelease>', self.on_config_change)
         ttk.Label(print_frame, text="мм").grid(row=4, column=2, sticky="w", pady=2)
 
-        # Опции
+        ttk.Label(print_frame, text="Зазор между визитками:").grid(row=5, column=0, sticky="w", pady=2)
+        self.gutter_spin = ttk.Spinbox(print_frame, from_=0, to=20, width=5)
+        self.gutter_spin.set(self.config.gutter)
+        self.gutter_spin.grid(row=5, column=1, sticky="w", pady=2)
+        self.gutter_spin.bind('<KeyRelease>', self.on_config_change)
+        ttk.Label(print_frame, text="мм").grid(row=5, column=2, sticky="w", pady=2)
+
         options_frame = ttk.Frame(print_frame)
-        options_frame.grid(row=5, column=0, columnspan=3, sticky="w", pady=5)
+        options_frame.grid(row=6, column=0, columnspan=3, sticky="w", pady=5)
 
         self.rotate_var = tk.BooleanVar(value=self.config.rotate_cards)
         self.rotate_cb = ttk.Checkbutton(options_frame, text="Поворачивать для экономии места",
@@ -147,138 +144,52 @@ class ImpositionApp:
                                        variable=self.crop_var, command=self.on_config_change)
         self.crop_cb.pack(side=tk.LEFT)
 
-        # Информация о раскладке
         info_frame = ttk.LabelFrame(parent, text="Информация о раскладке", padding=10)
         info_frame.grid(row=row, column=0, columnspan=3, sticky="we", pady=5)
         info_frame.columnconfigure(0, weight=1)
         row += 1
 
-        self.info_text = scrolledtext.ScrolledText(info_frame, height=6, font=("Courier", 9))
+        self.info_text = scrolledtext.ScrolledText(info_frame, height=6, wrap=tk.WORD)
         self.info_text.grid(row=0, column=0, sticky="we")
 
-        # Кнопки управления
-        button_frame = ttk.Frame(parent)
-        button_frame.grid(row=row, column=0, columnspan=3, pady=20)
+        buttons_frame = ttk.Frame(parent, padding=10)
+        buttons_frame.grid(row=row, column=0, columnspan=3, pady=10)
+        row += 1
 
-        ttk.Button(button_frame, text="Загрузить изображения",
-                   command=self.load_images).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Предпросмотр",
-                   command=self.update_preview).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Сгенерировать PDF",
-                   command=self.generate_pdf).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Очистить",
-                   command=self.clear_all).pack(side=tk.LEFT, padx=5)
-
-        self.update_custom_size_visibility()
+        ttk.Button(buttons_frame, text="Загрузить изображения", command=self.load_images).pack(side=tk.LEFT, padx=5)
+        ttk.Button(buttons_frame, text="Сгенерировать PDF", command=self.generate_pdf).pack(side=tk.LEFT, padx=5)
+        ttk.Button(buttons_frame, text="Очистить", command=self.clear_all).pack(side=tk.LEFT, padx=5)
 
     def setup_preview_tab(self, parent):
         """Настройка вкладки предпросмотра"""
-        parent.columnconfigure(0, weight=1)
-        parent.rowconfigure(0, weight=1)
+        self.preview_frame = parent
 
-        # Холст для предпросмотра
-        self.canvas = tk.Canvas(parent, bg='white', relief='sunken', bd=1)
-        self.canvas.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-
-        # Полоса прокрутки
-        v_scroll = ttk.Scrollbar(parent, orient="vertical", command=self.canvas.yview)
-        v_scroll.grid(row=0, column=1, sticky="ns")
-        self.canvas.configure(yscrollcommand=v_scroll.set)
-
-        h_scroll = ttk.Scrollbar(parent, orient="horizontal", command=self.canvas.xview)
-        h_scroll.grid(row=1, column=0, sticky="ew")
-        self.canvas.configure(xscrollcommand=h_scroll.set)
-
-        # Фрейм внутри холста для содержимого
-        self.preview_frame = ttk.Frame(self.canvas)
-        self.canvas.create_window((0, 0), window=self.preview_frame, anchor="nw")
-
-        self.preview_frame.bind("<Configure>", lambda e: self.canvas.configure(
-            scrollregion=self.canvas.bbox("all")))
-
-    def draw_preview(self):
-        """Нарисовать графический предпросмотр раскладки"""
-        # Очищаем предыдущий предпросмотр
-        for widget in self.preview_frame.winfo_children():
-            widget.destroy()
-
-        sheet_w, sheet_h = self.config.get_sheet_dimensions()
-        card_w, card_h = self.config.get_card_dimensions()
-
-        calculator = LayoutCalculator(
-            sheet_w, sheet_h, card_w, card_h,
-            self.config.margin, self.config.bleed, self.config.rotate_cards
+    def select_front_files(self):  # NEW
+        files = filedialog.askopenfilenames(
+            title="Выберите файлы лицевых сторон",
+            filetypes=[("Image files", "*.jpg *.jpeg *.png *.tiff *.bmp *.tif *.webp"),
+                       ("All files", "*.*")]
         )
-
-        layout = calculator.calculate_layout()
-
-        if layout['cards_total'] == 0:
-            ttk.Label(self.preview_frame, text="Визитки не помещаются на лист!",
-                      foreground="red", font=("Arial", 12)).pack(pady=20)
-            return
-
-        # Создаем canvas для рисования с фиксированным размером
-        canvas_width = 600
-        canvas_height = 400
-        preview_canvas = tk.Canvas(self.preview_frame,
-                                   width=canvas_width,
-                                   height=canvas_height,
-                                   bg='white', relief='sunken', bd=1)
-        preview_canvas.pack(pady=10)
-
-        # Масштаб для отображения
-        scale_x = (canvas_width - 40) / sheet_w
-        scale_y = (canvas_height - 40) / sheet_h
-        scale = min(scale_x, scale_y) * 0.9  # Оставляем отступы
-
-        # Центрируем рисунок
-        offset_x = (canvas_width - sheet_w * scale) / 2
-        offset_y = (canvas_height - sheet_h * scale) / 2
-
-        # Рисуем лист
-        preview_canvas.create_rectangle(
-            offset_x, offset_y,
-            offset_x + sheet_w * scale,
-            offset_y + sheet_h * scale,
-            outline='black', width=2, fill='#f8f8f8'
-        )
-
-        # Рисуем визитки
-        for i, pos in enumerate(layout['positions']):
-            x1 = offset_x + pos['x'] * scale
-            y1 = offset_y + pos['y'] * scale
-            x2 = x1 + pos['width'] * scale
-            y2 = y1 + pos['height'] * scale
-
-            color = 'lightblue' if not pos['rotated'] else 'lightgreen'
-            preview_canvas.create_rectangle(x1, y1, x2, y2, outline='blue', width=1, fill=color)
-
-            # Номер визитки
-            preview_canvas.create_text(x1 + 5, y1 + 5, text=str(i + 1),
-                                       anchor='nw', font=('Arial', 8), fill='darkblue')
-
-        # Информация под canvas
-        info_text = f"Лист: {sheet_w}×{sheet_h} мм\n" \
-                    f"Визитки: {layout['cards_x']}×{layout['cards_y']} = {layout['cards_total']} шт.\n" \
-                    f"Поворот: {'Да' if layout['rotated'] else 'Нет'}\n" \
-                    f"Эффективность: {layout['efficiency']:.1%}"
-
-        ttk.Label(self.preview_frame, text=info_text, font=('Courier', 10), justify='left').pack(pady=5)
-
-    def select_front_folder(self):
-        folder = filedialog.askdirectory(title="Выберите папку с лицевыми сторонами")
-        if folder:
+        if files:
+            self.config.front_files = list(files)
+            self.front_entry.configure(state='normal')
             self.front_entry.delete(0, tk.END)
-            self.front_entry.insert(0, folder)
-            self.config.front_folder = folder
+            self.front_entry.insert(0, "; ".join(os.path.basename(f) for f in files))
+            self.front_entry.configure(state='readonly')
             self.load_images()
 
-    def select_back_folder(self):
-        folder = filedialog.askdirectory(title="Выберите папку с оборотными сторонами")
-        if folder:
+    def select_back_files(self):  # NEW
+        files = filedialog.askopenfilenames(
+            title="Выберите файлы оборотных сторон",
+            filetypes=[("Image files", "*.jpg *.jpeg *.png *.tiff *.bmp *.tif *.webp"),
+                       ("All files", "*.*")]
+        )
+        if files:
+            self.config.back_files = list(files)
+            self.back_entry.configure(state='normal')
             self.back_entry.delete(0, tk.END)
-            self.back_entry.insert(0, folder)
-            self.config.back_folder = folder
+            self.back_entry.insert(0, "; ".join(os.path.basename(f) for f in files))
+            self.back_entry.configure(state='readonly')
             self.load_images()
 
     def on_config_change(self, event=None):
@@ -296,6 +207,7 @@ class ImpositionApp:
             self.config.custom_card_height = int(self.card_height_spin.get())
             self.config.margin = int(self.margin_spin.get())
             self.config.bleed = int(self.bleed_spin.get())
+            self.config.gutter = int(self.gutter_spin.get())
         except ValueError:
             pass
 
@@ -312,20 +224,20 @@ class ImpositionApp:
             self.custom_size_frame.grid_remove()
 
     def load_images(self):
-        """Загрузить изображения из выбранных папок"""
+        """Загрузить изображения из выбранных файлов"""
         self.update_config_from_ui()
 
         self.front_images = []
         self.back_images = []
 
         # Загружаем лицевые стороны
-        if self.config.front_folder and os.path.exists(self.config.front_folder):
-            front_infos, front_errors = scan_images(self.config.front_folder)
+        if self.config.front_files:
+            front_infos, front_errors = scan_images(self.config.front_files)  # UPDATED: передаем список файлов
             self.front_images = [info['path'] for info in front_infos]
 
         # Загружаем оборотные стороны
-        if self.config.back_folder and os.path.exists(self.config.back_folder):
-            back_infos, back_errors = scan_images(self.config.back_folder)
+        if self.config.back_files:
+            back_infos, back_errors = scan_images(self.config.back_files)  # UPDATED: передаем список файлов
             self.back_images = [info['path'] for info in back_infos]
 
         # Валидируем пары
@@ -356,7 +268,7 @@ class ImpositionApp:
 
         calculator = LayoutCalculator(
             sheet_w, sheet_h, card_w, card_h,
-            self.config.margin, self.config.bleed, self.config.rotate_cards
+            self.config.margin, self.config.bleed, self.config.gutter, self.config.rotate_cards
         )
 
         layout = calculator.calculate_layout()
@@ -377,21 +289,18 @@ class ImpositionApp:
         self.update_config_from_ui()
         self.update_layout_info()
 
-        # Здесь будет код для визуализации предпросмотра
-        # Пока просто очищаем холст
         for widget in self.preview_frame.winfo_children():
             widget.destroy()
 
         ttk.Label(self.preview_frame, text="Предпросмотр раскладки",
                   font=("Arial", 12, "bold")).pack(pady=10)
 
-        # Простая текстовая визуализация
         sheet_w, sheet_h = self.config.get_sheet_dimensions()
         card_w, card_h = self.config.get_card_dimensions()
 
         calculator = LayoutCalculator(
             sheet_w, sheet_h, card_w, card_h,
-            self.config.margin, self.config.bleed, self.config.rotate_cards
+            self.config.margin, self.config.bleed, self.config.gutter, self.config.rotate_cards
         )
 
         layout = calculator.calculate_layout()
@@ -440,19 +349,23 @@ class ImpositionApp:
 
     def clear_all(self):
         """Очистить все настройки"""
+        self.front_entry.configure(state='normal')
         self.front_entry.delete(0, tk.END)
+        self.front_entry.configure(state='readonly')
+        self.back_entry.configure(state='normal')
         self.back_entry.delete(0, tk.END)
+        self.back_entry.configure(state='readonly')
         self.config = PrintConfig()
         self.front_images = []
         self.back_images = []
 
-        # Сброс UI к значениям по умолчанию
         self.sheet_combo.set(self.config.sheet_size)
         self.card_combo.set(self.config.card_size)
         self.card_width_spin.set(self.config.custom_card_width)
         self.card_height_spin.set(self.config.custom_card_height)
         self.margin_spin.set(self.config.margin)
         self.bleed_spin.set(self.config.bleed)
+        self.gutter_spin.set(self.config.gutter)
         self.rotate_var.set(self.config.rotate_cards)
         self.crop_var.set(self.config.add_crop_marks)
 
