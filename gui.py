@@ -4,9 +4,11 @@ from PIL import Image, ImageTk
 import os
 import tempfile
 import matplotlib.pyplot as plt
+import numpy as np  # NEW: for array conversion
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.patches import Rectangle
+from matplotlib.offsetbox import OffsetImage, AnnotationBbox  # NEW: for image placement
 
 from config import PrintConfig, SHEET_SIZES, CARD_SIZES
 from image_utils import scan_images, validate_image_pairs
@@ -64,24 +66,23 @@ class ImpositionApp:
         title.grid(row=row, column=0, columnspan=3, pady=(0, 20))
         row += 1
 
-        folder_frame = ttk.LabelFrame(parent, text="Файлы изображений", padding=10)  # UPDATED: "Файлы" вместо "Папки"
+        folder_frame = ttk.LabelFrame(parent, text="Файлы изображений", padding=10)
         folder_frame.grid(row=row, column=0, columnspan=3, sticky="we", pady=5)
         folder_frame.columnconfigure(1, weight=1)
         row += 1
 
-        ttk.Label(folder_frame, text="Лицевые стороны (multiple OK):").grid(row=0, column=0, sticky="w", pady=2)  # UPDATED: уточнение
+        ttk.Label(folder_frame, text="Лицевые стороны (multiple OK):").grid(row=0, column=0, sticky="w", pady=2)
         self.front_entry = ttk.Entry(folder_frame)
         self.front_entry.grid(row=0, column=1, sticky="we", padx=5)
         self.front_entry.configure(state='readonly')
-        ttk.Button(folder_frame, text="Обзор", command=self.select_front_files).grid(row=0, column=2)  # UPDATED: files
+        ttk.Button(folder_frame, text="Обзор", command=self.select_front_files).grid(row=0, column=2)
 
-        ttk.Label(folder_frame, text="Оборотные стороны (multiple OK):").grid(row=1, column=0, sticky="w", pady=2)  # UPDATED: уточнение
+        ttk.Label(folder_frame, text="Оборотные стороны (multiple OK):").grid(row=1, column=0, sticky="w", pady=2)
         self.back_entry = ttk.Entry(folder_frame)
         self.back_entry.grid(row=1, column=1, sticky="we", padx=5)
         self.back_entry.configure(state='readonly')
-        ttk.Button(folder_frame, text="Обзор", command=self.select_back_files).grid(row=1, column=2)  # UPDATED: files
+        ttk.Button(folder_frame, text="Обзор", command=self.select_back_files).grid(row=1, column=2)
 
-        # NEW: Demo button
         ttk.Button(folder_frame, text="Загрузить демо", command=self.load_demo).grid(row=2, column=0, columnspan=3, pady=5)
 
         print_frame = ttk.LabelFrame(parent, text="Параметры печати", padding=10)
@@ -206,17 +207,15 @@ class ImpositionApp:
         self.preview_container = ttk.Frame(parent)
         self.preview_container.pack(fill=tk.BOTH, expand=True, pady=10)
 
-    def load_demo(self):  # UPDATED: Создаёт файлы, не папки
+    def load_demo(self):
         """Загрузить демо-изображения"""
         try:
             self.config.front_files = []
             self.config.back_files = []
 
-            # Создаём 5 temp PNG-файлов
             front_temp_files = []
             back_temp_files = []
             for i in range(5):
-                # Front
                 temp_front = tempfile.NamedTemporaryFile(suffix=f'_front_{i+1}.png', delete=False)
                 img_front = Image.new('RGB', (90, 50), color=(i*50, 100, 200))
                 img_front.save(temp_front.name)
@@ -224,7 +223,6 @@ class ImpositionApp:
                 front_temp_files.append(temp_front.name)
                 self.config.front_files.append(temp_front.name)
 
-                # Back
                 temp_back = tempfile.NamedTemporaryFile(suffix=f'_back_{i+1}.png', delete=False)
                 img_back = Image.new('RGB', (90, 50), color=(200, 100, i*50))
                 img_back.save(temp_back.name)
@@ -232,11 +230,11 @@ class ImpositionApp:
                 back_temp_files.append(temp_back.name)
                 self.config.back_files.append(temp_back.name)
 
-            # Обновляем entry (показываем первый файл как пример)
+            # UPDATED: Show first file name
             self.front_entry.delete(0, tk.END)
-            self.front_entry.insert(0, f"{len(front_temp_files)} файлов (temp: {os.path.basename(front_temp_files[0])}...)")
+            self.front_entry.insert(0, os.path.basename(front_temp_files[0]))
             self.back_entry.delete(0, tk.END)
-            self.back_entry.insert(0, f"{len(back_temp_files)} файлов (temp: {os.path.basename(back_temp_files[0])}...)")
+            self.back_entry.insert(0, os.path.basename(back_temp_files[0]))
 
             self.load_images()
             self.status_var.set(f"Демо загружено: {len(self.front_images)} визиток (temp файлы)")
@@ -244,7 +242,7 @@ class ImpositionApp:
         except Exception as e:
             messagebox.showerror("Ошибка демо", f"Не удалось создать демо: {e}")
 
-    def select_front_files(self):  # UPDATED: Выбор файлов
+    def select_front_files(self):
         """Выбор файлов лицевых сторон"""
         files = filedialog.askopenfilenames(
             title="Выберите файлы лицевых сторон",
@@ -252,12 +250,15 @@ class ImpositionApp:
         )
         if files:
             self.config.front_files = list(files)
+            # UPDATED: Show basename of first file
+            first_name = os.path.basename(files[0])
+            display_text = first_name if len(files) == 1 else f"{first_name} (и {len(files)-1} других)"
             self.front_entry.delete(0, tk.END)
-            self.front_entry.insert(0, f"{len(files)} файлов (первый: {os.path.basename(files[0])}...)")
+            self.front_entry.insert(0, display_text)
             self.front_entry.configure(state='readonly')
             self.load_images()
 
-    def select_back_files(self):  # UPDATED: Выбор файлов
+    def select_back_files(self):
         """Выбор файлов оборотных сторон"""
         files = filedialog.askopenfilenames(
             title="Выберите файлы оборотных сторон",
@@ -265,8 +266,11 @@ class ImpositionApp:
         )
         if files:
             self.config.back_files = list(files)
+            # UPDATED: Show basename of first file
+            first_name = os.path.basename(files[0])
+            display_text = first_name if len(files) == 1 else f"{first_name} (и {len(files)-1} других)"
             self.back_entry.delete(0, tk.END)
-            self.back_entry.insert(0, f"{len(files)} файлов (первый: {os.path.basename(files[0])}...)")
+            self.back_entry.insert(0, display_text)
             self.back_entry.configure(state='readonly')
             self.load_images()
 
@@ -330,11 +334,11 @@ class ImpositionApp:
         self.back_images = []
 
         if self.config.front_files:
-            front_infos, front_errors = scan_images(self.config.front_files, scan_folder=False)  # UPDATED: files only
+            front_infos, front_errors = scan_images(self.config.front_files, scan_folder=False)
             self.front_images = [info['path'] for info in front_infos]
 
         if self.config.back_files:
-            back_infos, back_errors = scan_images(self.config.back_files, scan_folder=False)  # UPDATED: files only
+            back_infos, back_errors = scan_images(self.config.back_files, scan_folder=False)
             self.back_images = [info['path'] for info in back_infos]
 
         front_info_list = []
@@ -439,14 +443,39 @@ class ImpositionApp:
         work_rect = Rectangle((self.config.margin, self.config.margin), sheet_w - 2*self.config.margin, sheet_h - 2*self.config.margin, linewidth=1, edgecolor='blue', facecolor='none')
         ax.add_patch(work_rect)
 
-        for pos in layout['positions']:
-            bleed_rect = Rectangle((pos['x'], pos['y']), pos['width'], pos['height'], linewidth=1, edgecolor='green', facecolor='none', alpha=0.3)
-            ax.add_patch(bleed_rect)
+        # UPDATED: Add images to positions
+        for i, pos in enumerate(layout['positions']):
             inner_x = pos['x'] + self.config.bleed
             inner_y = pos['y'] + self.config.bleed
+
+            # Bleed rect
+            bleed_rect = Rectangle((pos['x'], pos['y']), pos['width'], pos['height'], linewidth=1, edgecolor='green', facecolor='none', alpha=0.3)
+            ax.add_patch(bleed_rect)
+
+            # Card inner rect
             inner_rect = Rectangle((inner_x, inner_y), card_w, card_h, linewidth=1, edgecolor='black', facecolor='none')
             ax.add_patch(inner_rect)
 
+            # NEW: Show image if available (use front_images[i % len(front_images)] for repeat if needed)
+            if i < len(self.front_images):
+                try:
+                    img_path = self.front_images[i]
+                    img = Image.open(img_path)
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
+                    # Resize for preview (scale up for visibility)
+                    preview_scale = 2  # Adjust if too small/large
+                    img_resized = img.resize((int(card_w * preview_scale), int(card_h * preview_scale)), Image.Resampling.LANCZOS)
+                    arr = np.array(img_resized)
+                    im = OffsetImage(arr, zoom=1.0 / preview_scale)  # Zoom back to fit
+                    ab = AnnotationBbox(im, (inner_x + card_w / 2, inner_y + card_h / 2),
+                                        xybox=(0, 0), frameon=False, pad=0, boxcoords="offset points")
+                    ax.add_artist(ab)
+                except Exception as e:
+                    print(f"Ошибка загрузки изображения {img_path} для preview: {e}")
+                    # Fallback to empty rect
+
+            # Crop marks
             if self.config.add_crop_marks:
                 mark_len = self.config.mark_length
                 ax.plot([inner_x, inner_x], [inner_y, inner_y + mark_len], 'k-', lw=0.5)
@@ -458,7 +487,7 @@ class ImpositionApp:
                 ax.plot([inner_x + card_w, inner_x + card_w], [inner_y + card_h, inner_y + card_h - mark_len], 'k-', lw=0.5)
                 ax.plot([inner_x + card_w, inner_x + card_w + mark_len], [inner_y + card_h, inner_y + card_h], 'k-', lw=0.5)
 
-        ax.set_title("Предпросмотр раскладки (зеленый: bleed, черный: card, синий: work area)")
+        ax.set_title("Предпросмотр раскладки (зеленый: bleed, черный: card, синий: work area; изображения: front)")
         ax.axis('off')
 
         canvas = FigureCanvasTkAgg(fig, master=self.preview_container)

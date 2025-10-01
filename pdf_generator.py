@@ -12,10 +12,10 @@ class PDFGenerator:
         self.sheet_width, self.sheet_height = config.get_sheet_dimensions()
         self.card_width, self.card_height = config.get_card_dimensions()
         self.gutter = config.gutter
-        self.mark_length = config.mark_length  # NEW
-        self.matching_scheme = config.matching_scheme  # NEW
-        self.fit_proportions = config.fit_proportions  # NEW
-        self.dpi = 300  # Fixed
+        self.mark_length = config.mark_length
+        self.matching_scheme = config.matching_scheme
+        self.fit_proportions = config.fit_proportions
+        self.dpi = 300
 
     def generate_pdf(self, front_images, back_images, output_path):
         """Сгенерировать многостраничный PDF файл"""
@@ -33,7 +33,7 @@ class PDFGenerator:
         if layout['cards_total'] == 0:
             raise ValueError("Визитки не помещаются на лист")
 
-        # NEW: Adjust back_images based on scheme
+        # Adjust back_images based on scheme
         if back_images and self.matching_scheme != '1:1':
             if self.matching_scheme == '1:N':
                 back_images = [back_images[0]] * len(front_images)
@@ -53,7 +53,7 @@ class PDFGenerator:
             end_idx = min((sheet_num + 1) * cards_per_sheet, len(front_images))
             current_front_images = front_images[start_idx:end_idx]
 
-            self._generate_side(c, current_front_images, layout, f"Лист {sheet_num + 1} - Лицевые стороны")
+            self._generate_side(c, current_front_images, layout)
 
         if back_images:
             for sheet_num in range((len(back_images) + cards_per_sheet - 1) // cards_per_sheet):
@@ -63,7 +63,7 @@ class PDFGenerator:
                 end_idx = min((sheet_num + 1) * cards_per_sheet, len(back_images))
                 current_back_images = back_images[start_idx:end_idx]
 
-                self._generate_side(c, current_back_images, layout, f"Лист {sheet_num + 1} - Оборотные стороны")
+                self._generate_side(c, current_back_images, layout)
 
         c.save()
 
@@ -73,7 +73,7 @@ class PDFGenerator:
             'total_cards': len(front_images)
         }
 
-    def _generate_side(self, c, images, layout, side_name):
+    def _generate_side(self, c, images, layout):
         """Сгенерировать одну сторону листа"""
         if self.config.add_crop_marks:
             self._add_crop_marks(c, layout)
@@ -93,7 +93,7 @@ class PDFGenerator:
                     if img.mode != 'RGB':
                         img = img.convert('RGB')
 
-                    # NEW: Resize with fit_proportions
+                    # Resize with fit_proportions
                     target_w_mm = self.card_width + 2 * self.config.bleed
                     target_h_mm = self.card_height + 2 * self.config.bleed
                     target_w_px = int(target_w_mm * self.dpi / 25.4)
@@ -125,9 +125,7 @@ class PDFGenerator:
                     print(f"Ошибка обработки изображения {img_path}: {e}")
                     continue
 
-            c.setFont("Helvetica", 8)
-            c.drawString(10 * mm, 10 * mm, side_name)
-            c.drawString(10 * mm, 8 * mm, f"Сгенерировано визиточным импозером")
+            # UPDATED: Removed text labels (side_name and "Сгенерировано...")
 
         finally:
             for temp_file in temp_files:
@@ -138,7 +136,7 @@ class PDFGenerator:
 
     def _add_crop_marks(self, c, layout):
         """Добавить обрезные метки для каждой визитки"""
-        mark_length = self.mark_length * mm  # UPDATED
+        mark_length = self.mark_length * mm
 
         for pos in layout['positions']:
             bleed_mm = self.config.bleed * mm
