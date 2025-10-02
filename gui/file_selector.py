@@ -6,7 +6,8 @@ import os
 import tempfile
 from PIL import Image
 import logging
-from image_utils import scan_images, validate_image_pairs
+from image_utils import scan_images, validate_image_pairs, validate_image_pairs_extended, generate_validation_report, \
+    get_image_info
 from converter import convert_to_raster
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,8 @@ class FileSelector:
                    command=self.add_current_party).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Очистить текущую",
                    command=self.clear_current_party).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Проверить качество",
+                   command=self.validate_images).pack(side=tk.LEFT, padx=5)
 
         # Отображение партий
         self.parties_text = tk.Text(folder_frame, height=4, width=80, wrap=tk.WORD)
@@ -72,7 +75,8 @@ class FileSelector:
         """Выбор файлов лицевых сторон"""
         files = filedialog.askopenfilenames(
             title="Выберите файлы лицевых сторон",
-            filetypes=[("Все поддерживаемые", "*.jpg *.jpeg *.png *.tiff *.bmp *.tif *.webp *.pdf"), ("Все файлы", "*.*")]
+            filetypes=[("Все поддерживаемые", "*.jpg *.jpeg *.png *.tiff *.bmp *.tif *.webp *.pdf"),
+                       ("Все файлы", "*.*")]
         )
         if files:
             self.main_window.config.front_files = list(files)
@@ -83,7 +87,8 @@ class FileSelector:
         """Выбор файлов оборотных сторон"""
         files = filedialog.askopenfilenames(
             title="Выберите файлы оборотных сторон",
-            filetypes=[("Все поддерживаемые", "*.jpg *.jpeg *.png *.tiff *.bmp *.tif *.webp *.pdf"), ("Все файлы", "*.*")]
+            filetypes=[("Все поддерживаемые", "*.jpg *.jpeg *.png *.tiff *.bmp *.tif *.webp *.pdf"),
+                       ("Все файлы", "*.*")]
         )
         if files:
             self.main_window.config.back_files = list(files)
@@ -110,7 +115,7 @@ class FileSelector:
                 new_path, error = convert_to_raster(f)
                 if error:
                     conversion_errors.append(error)
-                if new_path != f: # Если файл был сконвертирован
+                if new_path != f:  # Если файл был сконвертирован
                     self.main_window.temp_files.append(new_path)
                 self.main_window.front_images.append(new_path)
 
@@ -119,12 +124,12 @@ class FileSelector:
                 new_path, error = convert_to_raster(f)
                 if error:
                     conversion_errors.append(error)
-                if new_path != f: # Если файл был сконвертирован
+                if new_path != f:  # Если файл был сконвертирован
                     self.main_window.temp_files.append(new_path)
                 self.main_window.back_images.append(new_path)
 
-        # Валидация изображений
-        self.validate_images()
+        # Базовая валидация изображений
+        self.validate_images_basic()
 
         if conversion_errors:
             self.main_window.show_error("Ошибки конвертации", "\n".join(conversion_errors))
@@ -133,8 +138,8 @@ class FileSelector:
             f"Текущая партия: {len(self.main_window.front_images)} лиц, {len(self.main_window.back_images)} рубашек")
         self.main_window.preview_panel.update_preview()
 
-    def validate_images(self):
-        """Валидация пар изображений"""
+    def validate_images_basic(self):
+        """Базовая валидация пар изображений"""
         front_info_list = []
         for p in self.main_window.front_images:
             try:
@@ -159,6 +164,174 @@ class FileSelector:
             self.main_window.show_error("Ошибки", "\n".join(errors))
         if warnings:
             self.main_window.show_warning("Предупреждения", "\n".join(warnings))
+
+    def validate_images(self):
+        """Расширенная валидация пар изображений с проверкой качества"""
+        front_info_list = []
+        for p in self.main_window.front_images:
+            try:
+                info = get_image_info(p)
+                front_info_list.append(info)
+            except Exception as e:
+                logger.error(f"Error loading image {p}: {e}")
+                front_info_list.append({
+                    'path': p,
+                    'filename': os.path.basename(p),
+                    'error': str(e)
+                })
+
+        back_info_list = []
+        for p in self.main_window.back_images:
+            try:
+                info = get_image_info(p)
+                back_info_list.append(info)
+            except Exception as e:
+                logger.error(f"Error loading image {p}: {e}")
+                back_info_list.append({
+                    'path': p,
+                    'filename': os.path.basename(p),
+                    'error': str(e)
+                })
+
+        # Используем расширенную валидацию
+        card_width, card_height = self.main_window.config.get_card_dimensions()
+        validation_result = validate_image_pairs_extended(
+            front_info_list, back_info_list,
+            self.main_window.config.matching_scheme,
+            self.main_window.config.match_by_name,
+            card_width,
+            card_height,
+            self.main_window.config.bleed
+        )
+
+        # Генерируем детальный отчет
+        report = generate_validation_report(validation_result)
+
+        # Показываем отчет в отдельном окне, если есть проблемы
+        if any([validation_result.errors, validation_result.warnings,
+                validation_result.dpi_issues, validation_result.color_issues,
+                validation_result.safe_zone_issues]):
+            self.show_validation_report(report)
+        else:
+            self.main_window.show_info("Проверка качества", "✅ Все проверки пройдены успешно!")
+
+    def show_validation_report(self, report):
+        """Показать детальный отчет о валидации"""
+        report_window = tk.Toplevel(self.parent)
+        report_window.title("Отчет о проверке качества изображений")
+        report_window.geometry("700x500")
+        report_window.minsize(600, 400)
+
+        # Заголовок
+        header_frame = ttk.Frame(report_window)
+        header_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Label(header_frame, text="Результаты проверки качества изображений",
+                  font=("Arial", 12, "bold")).pack(pady=5)
+
+        ttk.Label(header_frame, text="Детальный анализ DPI, цветовых профилей и безопасных зон",
+                  font=("Arial", 9), foreground="gray").pack()
+
+        # Основное содержимое
+        content_frame = ttk.Frame(report_window)
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        # Создаем текстовое поле с прокруткой
+        text_frame = ttk.Frame(content_frame)
+        text_frame.pack(fill=tk.BOTH, expand=True)
+
+        text_widget = tk.Text(text_frame, wrap=tk.WORD, font=("Courier", 9), padx=10, pady=10)
+        scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=text_widget.yview)
+        text_widget.configure(yscrollcommand=scrollbar.set)
+
+        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Вставляем отчет с цветовым форматированием
+        text_widget.insert(tk.END, report)
+
+        # Настраиваем теги для цветового форматирования
+        text_widget.tag_configure("error", foreground="red", font=("Courier", 9, "bold"))
+        text_widget.tag_configure("warning", foreground="orange", font=("Courier", 9, "bold"))
+        text_widget.tag_configure("dpi", foreground="purple", font=("Courier", 9))
+        text_widget.tag_configure("color", foreground="blue", font=("Courier", 9))
+        text_widget.tag_configure("safe_zone", foreground="brown", font=("Courier", 9))
+        text_widget.tag_configure("info", foreground="green", font=("Courier", 9))
+        text_widget.tag_configure("success", foreground="darkgreen", font=("Courier", 9, "bold"))
+
+        # Применяем цветовое форматирование
+        self.apply_text_formatting(text_widget, report)
+
+        text_widget.configure(state=tk.DISABLED)
+
+        # Кнопки
+        button_frame = ttk.Frame(report_window)
+        button_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Button(button_frame, text="Закрыть",
+                   command=report_window.destroy).pack(side=tk.RIGHT, padx=5)
+
+        ttk.Button(button_frame, text="Сохранить отчет",
+                   command=lambda: self.save_validation_report(report)).pack(side=tk.RIGHT, padx=5)
+
+    def apply_text_formatting(self, text_widget, report):
+        """Применить цветовое форматирование к тексту отчета"""
+        # Устанавливаем начальную позицию
+        text_widget.mark_set("insert", "1.0")
+
+        lines = report.split('\n')
+        current_line = 1
+
+        for line in lines:
+            if line.startswith("🚨 ОШИБКИ:"):
+                text_widget.tag_add("error", f"{current_line}.0", f"{current_line}.end")
+            elif line.startswith("⚠️ ПРЕДУПРЕЖДЕНИЯ:"):
+                text_widget.tag_add("warning", f"{current_line}.0", f"{current_line}.end")
+            elif line.startswith("📏 ПРОБЛЕМЫ С РАЗРЕШЕНИЕМ:"):
+                text_widget.tag_add("dpi", f"{current_line}.0", f"{current_line}.end")
+            elif line.startswith("🎨 ПРОБЛЕМЫ С ЦВЕТОМ:"):
+                text_widget.tag_add("color", f"{current_line}.0", f"{current_line}.end")
+            elif line.startswith("🛡️ ПРОБЛЕМЫ БЕЗОПАСНОЙ ЗОНЫ:"):
+                text_widget.tag_add("safe_zone", f"{current_line}.0", f"{current_line}.end")
+            elif line.startswith("ℹ️ ИНФОРМАЦИЯ:"):
+                text_widget.tag_add("info", f"{current_line}.0", f"{current_line}.end")
+            elif line.startswith("✅ Все проверки пройдены успешно!"):
+                text_widget.tag_add("success", f"{current_line}.0", f"{current_line}.end")
+            elif line.startswith("  •") and "🚨" in report:
+                # Находим категорию для текущей строки
+                if "🚨 ОШИБКИ:" in report and report.find("🚨 ОШИБКИ:") < report.find(line):
+                    text_widget.tag_add("error", f"{current_line}.0", f"{current_line}.end")
+                elif "⚠️ ПРЕДУПРЕЖДЕНИЯ:" in report and report.find("⚠️ ПРЕДУПРЕЖДЕНИЯ:") < report.find(line):
+                    text_widget.tag_add("warning", f"{current_line}.0", f"{current_line}.end")
+                elif "📏 ПРОБЛЕМЫ С РАЗРЕШЕНИЕМ:" in report and report.find("📏 ПРОБЛЕМЫ С РАЗРЕШЕНИЕМ:") < report.find(
+                        line):
+                    text_widget.tag_add("dpi", f"{current_line}.0", f"{current_line}.end")
+                elif "🎨 ПРОБЛЕМЫ С ЦВЕТОМ:" in report and report.find("🎨 ПРОБЛЕМЫ С ЦВЕТОМ:") < report.find(line):
+                    text_widget.tag_add("color", f"{current_line}.0", f"{current_line}.end")
+                elif "🛡️ ПРОБЛЕМЫ БЕЗОПАСНОЙ ЗОНЫ:" in report and report.find(
+                        "🛡️ ПРОБЛЕМЫ БЕЗОПАСНОЙ ЗОНЫ:") < report.find(line):
+                    text_widget.tag_add("safe_zone", f"{current_line}.0", f"{current_line}.end")
+
+            current_line += 1
+
+    def save_validation_report(self, report):
+        """Сохранить отчет о валидации в файл"""
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+            title="Сохранить отчет о проверке"
+        )
+
+        if filename:
+            try:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    f.write("ОТЧЕТ О ПРОВЕРКЕ КАЧЕСТВА ИЗОБРАЖЕНИЙ\n")
+                    f.write("=" * 50 + "\n\n")
+                    f.write(report)
+
+                self.main_window.show_info("Успех", f"Отчет сохранен в файл:\n{filename}")
+            except Exception as e:
+                self.main_window.show_error("Ошибка", f"Не удалось сохранить отчет: {e}")
 
     def add_current_party(self):
         """Добавить текущую партию"""
@@ -225,7 +398,6 @@ class FileSelector:
                 front_temp_files.append(temp_front.name)
                 self.main_window.config.front_files.append(temp_front.name)
                 self.main_window.temp_files.append(temp_front.name)
-
 
                 temp_back = tempfile.NamedTemporaryFile(suffix=f'_back_{i + 1}.png', delete=False)
                 img_back = Image.new('RGB', (900, 500), color=(200, 100, i * 50))
