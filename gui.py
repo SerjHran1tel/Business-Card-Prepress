@@ -4,11 +4,12 @@ from PIL import Image, ImageTk
 import os
 import tempfile
 import matplotlib.pyplot as plt
-import numpy as np  # NEW: for array conversion
+import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.patches import Rectangle
-from matplotlib.offsetbox import OffsetImage, AnnotationBbox  # NEW: for image placement
+from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+from matplotlib.patches import FancyBboxPatch
 
 from config import PrintConfig, SHEET_SIZES, CARD_SIZES
 from image_utils import scan_images, validate_image_pairs
@@ -26,6 +27,8 @@ class ImpositionApp:
         self.config = PrintConfig()
         self.front_images = []
         self.back_images = []
+        self.parties = []  # NEW: List of {'front': [], 'back': [], 'quantity': int}
+        self.current_quantity = 1  # NEW: For current party
 
         try:
             img = Image.new('RGB', (1, 1), color='white')
@@ -35,6 +38,11 @@ class ImpositionApp:
             pass
 
         self.setup_ui()
+        self.root.bind('<Configure>', self.on_resize)
+        self.preview_width = 800
+        self.preview_height = 500
+        self.canvas = None
+
         self.update_preview()
 
     def setup_ui(self):
@@ -83,7 +91,20 @@ class ImpositionApp:
         self.back_entry.configure(state='readonly')
         ttk.Button(folder_frame, text="Обзор", command=self.select_back_files).grid(row=1, column=2)
 
-        ttk.Button(folder_frame, text="Загрузить демо", command=self.load_demo).grid(row=2, column=0, columnspan=3, pady=5)
+        # NEW: Quantity spinbox
+        ttk.Label(folder_frame, text="Количество копий:").grid(row=2, column=0, sticky="w", pady=2)
+        self.quantity_spin = ttk.Spinbox(folder_frame, from_=1, to=10000, width=10)
+        self.quantity_spin.set(self.current_quantity)
+        self.quantity_spin.grid(row=2, column=1, sticky="w", pady=2)
+        self.quantity_spin.bind('<KeyRelease>', self.on_quantity_change)
+
+        ttk.Button(folder_frame, text="Загрузить демо", command=self.load_demo).grid(row=3, column=0, columnspan=3, pady=5)
+
+        # NEW: Party buttons
+        party_frame = ttk.Frame(folder_frame)
+        party_frame.grid(row=4, column=0, columnspan=3, pady=5)
+        ttk.Button(party_frame, text="Добавить партию", command=self.add_current_party).pack(side=tk.LEFT, padx=5)
+        ttk.Button(party_frame, text="Очистить текущую партию", command=self.clear_current_party).pack(side=tk.LEFT, padx=5)
 
         print_frame = ttk.LabelFrame(parent, text="Параметры печати", padding=10)
         print_frame.grid(row=row, column=0, columnspan=3, sticky="we", pady=5)
@@ -103,11 +124,13 @@ class ImpositionApp:
         self.sheet_width_spin.set(self.config.custom_sheet_width)
         self.sheet_width_spin.pack(side=tk.LEFT, padx=5)
         self.sheet_width_spin.bind('<KeyRelease>', self.on_config_change)
+        self.sheet_width_spin.bind('<Return>', self.on_config_change)
         ttk.Label(self.custom_sheet_frame, text="Высота:").pack(side=tk.LEFT)
         self.sheet_height_spin = ttk.Spinbox(self.custom_sheet_frame, from_=100, to=1000, width=5)
         self.sheet_height_spin.set(self.config.custom_sheet_height)
         self.sheet_height_spin.pack(side=tk.LEFT, padx=5)
         self.sheet_height_spin.bind('<KeyRelease>', self.on_config_change)
+        self.sheet_height_spin.bind('<Return>', self.on_config_change)
         ttk.Label(self.custom_sheet_frame, text="мм").pack(side=tk.LEFT)
 
         ttk.Label(print_frame, text="Размер визитки:").grid(row=2, column=0, sticky="w", pady=2)
@@ -124,12 +147,14 @@ class ImpositionApp:
         self.card_width_spin.set(self.config.custom_card_width)
         self.card_width_spin.pack(side=tk.LEFT, padx=5)
         self.card_width_spin.bind('<KeyRelease>', self.on_config_change)
+        self.card_width_spin.bind('<Return>', self.on_config_change)
 
         ttk.Label(self.custom_size_frame, text="Высота:").pack(side=tk.LEFT)
         self.card_height_spin = ttk.Spinbox(self.custom_size_frame, from_=10, to=200, width=5)
         self.card_height_spin.set(self.config.custom_card_height)
         self.card_height_spin.pack(side=tk.LEFT, padx=5)
         self.card_height_spin.bind('<KeyRelease>', self.on_config_change)
+        self.card_height_spin.bind('<Return>', self.on_config_change)
 
         ttk.Label(self.custom_size_frame, text="мм").pack(side=tk.LEFT)
 
@@ -138,6 +163,7 @@ class ImpositionApp:
         self.margin_spin.set(self.config.margin)
         self.margin_spin.grid(row=4, column=1, sticky="w", pady=2)
         self.margin_spin.bind('<KeyRelease>', self.on_config_change)
+        self.margin_spin.bind('<Return>', self.on_config_change)
         ttk.Label(print_frame, text="мм").grid(row=4, column=2, sticky="w", pady=2)
 
         ttk.Label(print_frame, text="Вылет под обрез:").grid(row=5, column=0, sticky="w", pady=2)
@@ -145,6 +171,7 @@ class ImpositionApp:
         self.bleed_spin.set(self.config.bleed)
         self.bleed_spin.grid(row=5, column=1, sticky="w", pady=2)
         self.bleed_spin.bind('<KeyRelease>', self.on_config_change)
+        self.bleed_spin.bind('<Return>', self.on_config_change)
         ttk.Label(print_frame, text="мм").grid(row=5, column=2, sticky="w", pady=2)
 
         ttk.Label(print_frame, text="Зазор между визитками:").grid(row=6, column=0, sticky="w", pady=2)
@@ -152,6 +179,7 @@ class ImpositionApp:
         self.gutter_spin.set(self.config.gutter)
         self.gutter_spin.grid(row=6, column=1, sticky="w", pady=2)
         self.gutter_spin.bind('<KeyRelease>', self.on_config_change)
+        self.gutter_spin.bind('<Return>', self.on_config_change)
         ttk.Label(print_frame, text="мм").grid(row=6, column=2, sticky="w", pady=2)
 
         ttk.Label(print_frame, text="Длина обрезных меток:").grid(row=7, column=0, sticky="w", pady=2)
@@ -159,6 +187,7 @@ class ImpositionApp:
         self.mark_length_spin.set(self.config.mark_length)
         self.mark_length_spin.grid(row=7, column=1, sticky="w", pady=2)
         self.mark_length_spin.bind('<KeyRelease>', self.on_config_change)
+        self.mark_length_spin.bind('<Return>', self.on_config_change)
         ttk.Label(print_frame, text="мм").grid(row=7, column=2, sticky="w", pady=2)
 
         ttk.Label(print_frame, text="Схема сопоставления:").grid(row=8, column=0, sticky="w", pady=2)
@@ -196,9 +225,14 @@ class ImpositionApp:
         self.info_text = scrolledtext.ScrolledText(info_frame, height=6, wrap=tk.WORD)
         self.info_text.grid(row=0, column=0, sticky="we", pady=5)
 
+        # NEW: Parties list (simple text display)
+        self.parties_text = tk.Text(parent, height=4, width=80, wrap=tk.WORD)
+        self.parties_text.grid(row=row+1, column=0, columnspan=3, sticky="we", pady=5)
+
         button_frame = ttk.Frame(parent)
-        button_frame.grid(row=row+1, column=0, columnspan=3, pady=20)
-        ttk.Button(button_frame, text="Генерировать PDF", command=self.generate_pdf).pack(side=tk.LEFT, padx=5)
+        button_frame.grid(row=row+2, column=0, columnspan=3, pady=20)
+        ttk.Button(button_frame, text="Завершить и сгенерировать PDF", command=self.generate_pdf).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Очистить все партии", command=self.clear_all_parties).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Очистить", command=self.clear_all).pack(side=tk.LEFT, padx=5)
 
     def setup_preview_tab(self, parent):
@@ -206,6 +240,78 @@ class ImpositionApp:
         ttk.Label(parent, text="Визуальный предпросмотр раскладки", font=("Arial", 12, "bold")).pack(pady=10)
         self.preview_container = ttk.Frame(parent)
         self.preview_container.pack(fill=tk.BOTH, expand=True, pady=10)
+
+    def on_resize(self, event):
+        """Обработчик изменения размера окна"""
+        if event.widget == self.root and hasattr(self, 'preview_container'):
+            new_width = self.preview_container.winfo_width()
+            new_height = self.preview_container.winfo_height()
+            if new_width > 0 and new_height > 0 and (new_width != self.preview_width or new_height != self.preview_height):
+                self.preview_width = new_width
+                self.preview_height = new_height
+                self.update_preview()
+
+    def on_quantity_change(self, event=None):
+        """Обработчик изменения количества"""
+        try:
+            self.current_quantity = int(self.quantity_spin.get())
+        except ValueError:
+            pass
+        self.update_preview()
+
+    def add_current_party(self):
+        """Добавить текущую партию к списку"""
+        if not self.front_images:
+            messagebox.showerror("Ошибка", "Выберите файлы для партии!")
+            return
+
+        party = {
+            'front': self.front_images[:],  # Copy lists
+            'back': self.back_images[:],
+            'quantity': self.current_quantity
+        }
+        self.parties.append(party)
+
+        # Clear current for next
+        self.clear_current_party()
+
+        self.update_parties_display()
+        self.update_preview()
+        messagebox.showinfo("Успех", f"Добавлена партия: {len(party['front'])} дизайнов × {party['quantity']} копий")
+
+    def clear_current_party(self):
+        """Очистить текущую партию (для следующей)"""
+        self.front_images = []
+        self.back_images = []
+        self.current_quantity = 1
+        self.quantity_spin.set(1)
+        self.front_entry.configure(state='normal')
+        self.front_entry.delete(0, tk.END)
+        self.front_entry.configure(state='readonly')
+        self.back_entry.configure(state='normal')
+        self.back_entry.delete(0, tk.END)
+        self.back_entry.configure(state='readonly')
+        self.update_preview()
+
+    def clear_all_parties(self):
+        """Очистить все партии"""
+        self.parties = []
+        self.clear_current_party()
+        self.update_parties_display()
+        self.update_preview()
+        messagebox.showinfo("Очищено", "Все партии удалены")
+
+    def update_parties_display(self):
+        """Обновить отображение списка партий"""
+        text = "Партии:\n"
+        total_cards = 0
+        for i, party in enumerate(self.parties, 1):
+            num_designs = len(party['front'])
+            text += f"Партия {i}: {num_designs} дизайнов × {party['quantity']} копий = {num_designs * party['quantity']} визиток\n"
+            total_cards += num_designs * party['quantity']
+        text += f"\nОбщее количество визиток: {total_cards}"
+        self.parties_text.delete(1.0, tk.END)
+        self.parties_text.insert(1.0, text)
 
     def load_demo(self):
         """Загрузить демо-изображения"""
@@ -230,15 +336,13 @@ class ImpositionApp:
                 back_temp_files.append(temp_back.name)
                 self.config.back_files.append(temp_back.name)
 
-            # UPDATED: Show first file name
             self.front_entry.delete(0, tk.END)
             self.front_entry.insert(0, os.path.basename(front_temp_files[0]))
             self.back_entry.delete(0, tk.END)
             self.back_entry.insert(0, os.path.basename(back_temp_files[0]))
 
-            self.load_images()
-            self.status_var.set(f"Демо загружено: {len(self.front_images)} визиток (temp файлы)")
-            messagebox.showinfo("Демо", "Загружено 5 демо-визиток (цветные квадраты). Temp-файлы удалятся после закрытия.")
+            # Load to current
+            self.load_images_current()
         except Exception as e:
             messagebox.showerror("Ошибка демо", f"Не удалось создать демо: {e}")
 
@@ -250,13 +354,12 @@ class ImpositionApp:
         )
         if files:
             self.config.front_files = list(files)
-            # UPDATED: Show basename of first file
             first_name = os.path.basename(files[0])
             display_text = first_name if len(files) == 1 else f"{first_name} (и {len(files)-1} других)"
             self.front_entry.delete(0, tk.END)
             self.front_entry.insert(0, display_text)
             self.front_entry.configure(state='readonly')
-            self.load_images()
+            self.load_images_current()
 
     def select_back_files(self):
         """Выбор файлов оборотных сторон"""
@@ -266,13 +369,52 @@ class ImpositionApp:
         )
         if files:
             self.config.back_files = list(files)
-            # UPDATED: Show basename of first file
             first_name = os.path.basename(files[0])
             display_text = first_name if len(files) == 1 else f"{first_name} (и {len(files)-1} других)"
             self.back_entry.delete(0, tk.END)
             self.back_entry.insert(0, display_text)
             self.back_entry.configure(state='readonly')
-            self.load_images()
+            self.load_images_current()
+
+    def load_images_current(self):  # UPDATED: For current party
+        """Загрузить изображения для текущей партии"""
+        self.update_config_from_ui()
+
+        self.front_images = []
+        self.back_images = []
+
+        if self.config.front_files:
+            front_infos, front_errors = scan_images(self.config.front_files, scan_folder=False)
+            self.front_images = [info['path'] for info in front_infos]
+
+        if self.config.back_files:
+            back_infos, back_errors = scan_images(self.config.back_files, scan_folder=False)
+            self.back_images = [info['path'] for info in back_infos]
+
+        front_info_list = []
+        for p in self.front_images:
+            try:
+                front_info_list.append({'path': p, 'filename': os.path.basename(p), 'size': Image.open(p).size})
+            except:
+                pass
+        back_info_list = []
+        for p in self.back_images:
+            try:
+                back_info_list.append({'path': p, 'filename': os.path.basename(p), 'size': Image.open(p).size})
+            except:
+                pass
+
+        errors, warnings = validate_image_pairs(
+            front_info_list, back_info_list, self.config.matching_scheme, self.config.match_by_name
+        )
+
+        if errors:
+            messagebox.showerror("Ошибки", "\n".join(errors))
+        if warnings:
+            messagebox.showwarning("Предупреждения", "\n".join(warnings))
+
+        self.status_var.set(f"Текущая партия: {len(self.front_images)} лиц, {len(self.back_images)} рубашек")
+        self.update_preview()
 
     def on_config_change(self, event=None):
         """Обработчик изменения настроек"""
@@ -326,45 +468,9 @@ class ImpositionApp:
         else:
             self.custom_size_frame.grid_remove()
 
-    def load_images(self):
-        """Загрузить изображения из выбранных файлов"""
-        self.update_config_from_ui()
-
-        self.front_images = []
-        self.back_images = []
-
-        if self.config.front_files:
-            front_infos, front_errors = scan_images(self.config.front_files, scan_folder=False)
-            self.front_images = [info['path'] for info in front_infos]
-
-        if self.config.back_files:
-            back_infos, back_errors = scan_images(self.config.back_files, scan_folder=False)
-            self.back_images = [info['path'] for info in back_infos]
-
-        front_info_list = []
-        for p in self.front_images:
-            try:
-                front_info_list.append({'path': p, 'filename': os.path.basename(p), 'size': Image.open(p).size})
-            except:
-                pass
-        back_info_list = []
-        for p in self.back_images:
-            try:
-                back_info_list.append({'path': p, 'filename': os.path.basename(p), 'size': Image.open(p).size})
-            except:
-                pass
-
-        errors, warnings = validate_image_pairs(
-            front_info_list, back_info_list, self.config.matching_scheme, self.config.match_by_name
-        )
-
-        if errors:
-            messagebox.showerror("Ошибки", "\n".join(errors))
-        if warnings:
-            messagebox.showwarning("Предупреждения", "\n".join(warnings))
-
-        self.status_var.set(f"Загружено: {len(self.front_images)} лиц, {len(self.back_images)} рубашек")
-        self.update_preview()
+    def get_total_cards(self):
+        """Получить общее количество визиток из всех партий"""
+        return sum(len(party['front']) * party['quantity'] for party in self.parties)
 
     def update_layout_info(self):
         """Обновить информацию о раскладке"""
@@ -380,18 +486,20 @@ class ImpositionApp:
         )
 
         layout = calculator.calculate_layout()
-        sheets_needed = calculator.calculate_sheets_needed(len(self.front_images))
+        total_cards = self.get_total_cards()
+        sheets_needed = calculator.calculate_sheets_needed(total_cards) if total_cards > 0 else 0
 
         info = f"""Размер листа: {sheet_w}×{sheet_h} мм
 Размер визитки: {card_w}×{card_h} мм
 Раскладка: {layout['cards_x']}×{layout['cards_y']} = {layout['cards_total']} визиток/лист
 Эффективность: {layout['efficiency']:.1%}
 Потребуется листов: {sheets_needed}
-Всего визиток: {len(self.front_images)}
-Схема: {self.config.matching_scheme}"""
+Всего визиток: {total_cards}
+Схема: {self.config.matching_scheme}
+Партий: {len(self.parties)}"""
 
-        if len(self.front_images) == 0:
-            info += "\n\nВыберите файлы изображений для полного расчета!"
+        if total_cards == 0:
+            info += "\n\nДобавьте хотя бы одну партию для полного расчета!"
 
         self.info_text.delete(1.0, tk.END)
         self.info_text.insert(1.0, info)
@@ -404,8 +512,9 @@ class ImpositionApp:
         for widget in self.preview_container.winfo_children():
             widget.destroy()
 
-        if len(self.front_images) == 0:
-            ttk.Label(self.preview_container, text="Выберите файлы для предпросмотра раскладки\n(или нажмите 'Загрузить демо')",
+        total_cards = self.get_total_cards()
+        if total_cards == 0 and len(self.front_images) == 0:
+            ttk.Label(self.preview_container, text="Выберите файлы и добавьте партию для предпросмотра\n(или нажмите 'Загрузить демо')",
                       font=("Arial", 10), foreground="orange").pack(pady=20)
             return
 
@@ -419,89 +528,131 @@ class ImpositionApp:
 
         layout = calculator.calculate_layout()
 
-        if not self.back_images and self.config.add_crop_marks:
-            messagebox.showwarning("Предупреждение", "Не найдено оборотных сторон (будет создана односторонняя раскладка)")
-
-        if layout['cards_total'] > 0:
-            preview_text = f"""Лист: {sheet_w}×{sheet_h} мм
-Визитки: {layout['cards_x']}×{layout['cards_y']} = {layout['cards_total']} шт.
-Поворот: {'Да' if layout['rotated'] else 'Нет'}"""
-            ttk.Label(self.preview_container, text=preview_text, font=("Courier", 10)).pack(pady=5)
-        else:
+        if layout['cards_total'] == 0:
             ttk.Label(self.preview_container, text="Визитки не помещаются на лист!", foreground="red").pack(pady=5)
             return
 
-        fig = Figure(figsize=(8, 11), dpi=100)
-        ax = fig.add_subplot(111)
-        ax.set_xlim(0, sheet_w)
-        ax.set_ylim(0, sheet_h)
-        ax.set_aspect('equal')
-        ax.invert_yaxis()
+        fig_width = max(8, self.preview_width / 100)
+        fig_height = max(6, self.preview_height / 100)
+        fig = Figure(figsize=(fig_width, fig_height), dpi=100)
+        fig.suptitle("Предпросмотр раскладки (левый: передняя, правый: задняя)", fontsize=12)
 
-        margin_rect = Rectangle((0, 0), sheet_w, sheet_h, linewidth=1, edgecolor='gray', facecolor='none', linestyle='--')
-        ax.add_patch(margin_rect)
-        work_rect = Rectangle((self.config.margin, self.config.margin), sheet_w - 2*self.config.margin, sheet_h - 2*self.config.margin, linewidth=1, edgecolor='blue', facecolor='none')
-        ax.add_patch(work_rect)
+        ax_front = fig.add_subplot(121)
+        ax_front.set_xlim(0, sheet_w)
+        ax_front.set_ylim(0, sheet_h)
+        ax_front.set_aspect('equal')
+        ax_front.invert_yaxis()
+        ax_front.set_title("Передняя сторона")
 
-        # UPDATED: Add images to positions
-        for i, pos in enumerate(layout['positions']):
-            inner_x = pos['x'] + self.config.bleed
-            inner_y = pos['y'] + self.config.bleed
+        ax_back = fig.add_subplot(122)
+        ax_back.set_xlim(0, sheet_w)
+        ax_back.set_ylim(0, sheet_h)
+        ax_back.set_aspect('equal')
+        ax_back.invert_yaxis()
 
-            # Bleed rect
-            bleed_rect = Rectangle((pos['x'], pos['y']), pos['width'], pos['height'], linewidth=1, edgecolor='green', facecolor='none', alpha=0.3)
-            ax.add_patch(bleed_rect)
+        if len(self.back_images) > 0:
+            ax_back.set_title("Задняя сторона")
+            if self.config.matching_scheme != '1:1':
+                if self.config.matching_scheme == '1:N':
+                    self.back_images_preview = [self.back_images[0]] * len(self.front_images)
+                elif self.config.matching_scheme == 'M:N':
+                    self.back_images_preview = [self.back_images[i % len(self.back_images)] for i in range(len(self.front_images))]
+            else:
+                self.back_images_preview = self.back_images
+        else:
+            ax_back.set_title("Задняя сторона (отсутствует)")
+            ax_back.text(0.5, 0.5, "Нет оборотных сторон\n(односторонняя печать)", ha='center', va='center', transform=ax_back.transAxes, fontsize=10, color='orange')
 
-            # Card inner rect
-            inner_rect = Rectangle((inner_x, inner_y), card_w, card_h, linewidth=1, edgecolor='black', facecolor='none')
-            ax.add_patch(inner_rect)
+        # Draw styled margins for both axes
+        for ax in [ax_front, ax_back]:
+            sheet_rect = FancyBboxPatch((0, 0), sheet_w, sheet_h, boxstyle="round,pad=0.01",
+                                        edgecolor='gray', facecolor='lightgray', alpha=0.1, linewidth=2)
+            ax.add_patch(sheet_rect)
+            ax.text(sheet_w/2, -sheet_h*0.05, 'Sheet (Margins)', ha='center', fontsize=8, color='gray', transform=ax.transData)
 
-            # NEW: Show image if available (use front_images[i % len(front_images)] for repeat if needed)
-            if i < len(self.front_images):
-                try:
-                    img_path = self.front_images[i]
-                    img = Image.open(img_path)
-                    if img.mode != 'RGB':
-                        img = img.convert('RGB')
-                    # Resize for preview (scale up for visibility)
-                    preview_scale = 2  # Adjust if too small/large
-                    img_resized = img.resize((int(card_w * preview_scale), int(card_h * preview_scale)), Image.Resampling.LANCZOS)
-                    arr = np.array(img_resized)
-                    im = OffsetImage(arr, zoom=1.0 / preview_scale)  # Zoom back to fit
-                    ab = AnnotationBbox(im, (inner_x + card_w / 2, inner_y + card_h / 2),
-                                        xybox=(0, 0), frameon=False, pad=0, boxcoords="offset points")
-                    ax.add_artist(ab)
-                except Exception as e:
-                    print(f"Ошибка загрузки изображения {img_path} для preview: {e}")
-                    # Fallback to empty rect
+            work_x = self.config.margin
+            work_y = self.config.margin
+            work_w = sheet_w - 2 * self.config.margin
+            work_h = sheet_h - 2 * self.config.margin
+            work_rect = FancyBboxPatch((work_x, work_y), work_w, work_h, boxstyle="round,pad=0.005",
+                                       edgecolor='blue', facecolor='lightblue', alpha=0.2, linewidth=1.5)
+            ax.add_patch(work_rect)
+            ax.text(work_x + work_w/2, work_y - 5, 'Work Area', ha='center', fontsize=8, color='blue', transform=ax.transData)
 
-            # Crop marks
-            if self.config.add_crop_marks:
-                mark_len = self.config.mark_length
-                ax.plot([inner_x, inner_x], [inner_y, inner_y + mark_len], 'k-', lw=0.5)
-                ax.plot([inner_x, inner_x - mark_len], [inner_y, inner_y], 'k-', lw=0.5)
-                ax.plot([inner_x + card_w, inner_x + card_w], [inner_y, inner_y + mark_len], 'k-', lw=0.5)
-                ax.plot([inner_x + card_w, inner_x + card_w + mark_len], [inner_y, inner_y], 'k-', lw=0.5)
-                ax.plot([inner_x, inner_x], [inner_y + card_h, inner_y + card_h - mark_len], 'k-', lw=0.5)
-                ax.plot([inner_x, inner_x - mark_len], [inner_y + card_h, inner_y + card_h], 'k-', lw=0.5)
-                ax.plot([inner_x + card_w, inner_x + card_w], [inner_y + card_h, inner_y + card_h - mark_len], 'k-', lw=0.5)
-                ax.plot([inner_x + card_w, inner_x + card_w + mark_len], [inner_y + card_h, inner_y + card_h], 'k-', lw=0.5)
+        # Function to draw side (use current images for preview)
+        def draw_side(ax, images_list):
+            for i, pos in enumerate(layout['positions']):
+                if i >= len(images_list):
+                    break
+                inner_x = pos['x'] + self.config.bleed
+                inner_y = pos['y'] + self.config.bleed
 
-        ax.set_title("Предпросмотр раскладки (зеленый: bleed, черный: card, синий: work area; изображения: front)")
-        ax.axis('off')
+                bleed_rect = FancyBboxPatch((pos['x'], pos['y']), pos['width'], pos['height'],
+                                             boxstyle="round,pad=0.005", edgecolor='green', facecolor='lightgreen',
+                                             alpha=0.15, linewidth=1)
+                ax.add_patch(bleed_rect)
+                ax.text(pos['x'] + pos['width']/2, pos['y'] - 2, 'Bleed', ha='center', fontsize=7, color='green', transform=ax.transData)
 
-        canvas = FigureCanvasTkAgg(fig, master=self.preview_container)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+                inner_rect = FancyBboxPatch((inner_x, inner_y), card_w, card_h, boxstyle="round,pad=0.005",
+                                            edgecolor='black', facecolor='white', linewidth=1.5)
+                ax.add_patch(inner_rect)
+                ax.text(inner_x + card_w/2, inner_y + card_h + 2, 'Card', ha='center', fontsize=7, color='black', transform=ax.transData)
+
+                if i < len(images_list):
+                    try:
+                        img_path = images_list[i]
+                        img = Image.open(img_path)
+                        if img.mode != 'RGB':
+                            img = img.convert('RGB')
+                        preview_scale = 2
+                        img_resized = img.resize((int(card_w * preview_scale), int(card_h * preview_scale)), Image.Resampling.LANCZOS)
+                        arr = np.array(img_resized)
+                        im = OffsetImage(arr, zoom=1.0 / preview_scale)
+                        ab = AnnotationBbox(im, (inner_x + card_w / 2, inner_y + card_h / 2),
+                                            xybox=(0, 0), frameon=False, pad=0, boxcoords="offset points")
+                        ax.add_artist(ab)
+                    except Exception as e:
+                        print(f"Ошибка загрузки изображения {img_path} для preview: {e}")
+
+                if self.config.add_crop_marks:
+                    mark_len = self.config.mark_length
+                    ax.plot([inner_x, inner_x], [inner_y, inner_y + mark_len], 'k-', lw=0.5)
+                    ax.plot([inner_x, inner_x - mark_len], [inner_y, inner_y], 'k-', lw=0.5)
+                    ax.plot([inner_x + card_w, inner_x + card_w], [inner_y, inner_y + mark_len], 'k-', lw=0.5)
+                    ax.plot([inner_x + card_w, inner_x + card_w + mark_len], [inner_y, inner_y], 'k-', lw=0.5)
+                    ax.plot([inner_x, inner_x], [inner_y + card_h, inner_y + card_h - mark_len], 'k-', lw=0.5)
+                    ax.plot([inner_x, inner_x - mark_len], [inner_y + card_h, inner_y + card_h], 'k-', lw=0.5)
+                    ax.plot([inner_x + card_w, inner_x + card_w], [inner_y + card_h, inner_y + card_h - mark_len], 'k-', lw=0.5)
+                    ax.plot([inner_x + card_w, inner_x + card_w + mark_len], [inner_y + card_h, inner_y + card_h], 'k-', lw=0.5)
+
+        # Draw current front/back for preview
+        draw_side(ax_front, self.front_images)
+
+        if len(self.back_images) > 0:
+            draw_side(ax_back, self.back_images_preview if hasattr(self, 'back_images_preview') else self.back_images)
+        else:
+            messagebox.showwarning("Предупреждение", "Не найдено оборотных сторон (будет создана односторонняя раскладка)")
+
+        for ax in [ax_front, ax_back]:
+            ax.axis('off')
+
+        if self.canvas:
+            self.canvas.get_tk_widget().destroy()
+        self.canvas = FigureCanvasTkAgg(fig, master=self.preview_container)
+        self.canvas.draw()
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        preview_text = f"""Лист: {sheet_w}×{sheet_h} мм
+Визитки: {layout['cards_x']}×{layout['cards_y']} = {layout['cards_total']} шт.
+Поворот: {'Да' if layout['rotated'] else 'Нет'}"""
+        ttk.Label(self.preview_container, text=preview_text, font=("Courier", 10)).pack(pady=5)
 
     def generate_pdf(self):
         """Сгенерировать PDF файл"""
-        if not self.front_images:
-            messagebox.showerror("Ошибка", "Нет изображений для генерации PDF. Выберите файлы!")
+        total_cards = self.get_total_cards()
+        if total_cards == 0:
+            messagebox.showerror("Ошибка", "Нет визиток в партиях для генерации PDF. Добавьте партии!")
             return
-
-        if not self.back_images:
-            messagebox.showwarning("Предупреждение", "Не найдено оборотных сторон (будет создана односторонняя раскладка)")
 
         output_file = filedialog.asksaveasfilename(
             defaultextension=".pdf",
@@ -514,13 +665,26 @@ class ImpositionApp:
 
         try:
             generator = PDFGenerator(self.config)
-            result = generator.generate_pdf(self.front_images, self.back_images, output_file)
+            # NEW: Generate for all parties
+            all_front = []
+            all_back = []
+            for party in self.parties:
+                # Repeat files quantity times
+                for _ in range(party['quantity']):
+                    all_front.extend(party['front'])
+                    if party['back']:
+                        all_back.extend(party['back'])
+                    else:
+                        all_back.extend([None] * len(party['front']))  # Placeholder for single-sided
+
+            result = generator.generate_pdf(all_front, all_back, output_file)
 
             messagebox.showinfo("Успех",
                                 f"PDF успешно создан!\n"
                                 f"Файл: {output_file}\n"
                                 f"Листов: {result['total_sheets']}\n"
-                                f"Визиток на листе: {result['cards_per_sheet']}")
+                                f"Визиток на листе: {result['cards_per_sheet']}\n"
+                                f"Всего визиток: {total_cards}")
 
             self.status_var.set(f"PDF создан: {os.path.basename(output_file)}")
 
@@ -530,15 +694,14 @@ class ImpositionApp:
 
     def clear_all(self):
         """Очистить все настройки"""
+        self.clear_all_parties()
+        self.config = PrintConfig()
         self.front_entry.configure(state='normal')
         self.front_entry.delete(0, tk.END)
         self.front_entry.configure(state='readonly')
         self.back_entry.configure(state='normal')
         self.back_entry.delete(0, tk.END)
         self.back_entry.configure(state='readonly')
-        self.config = PrintConfig()
-        self.front_images = []
-        self.back_images = []
 
         self.sheet_combo.set(self.config.sheet_size)
         self.card_combo.set(self.config.card_size)
@@ -551,6 +714,7 @@ class ImpositionApp:
         self.bleed_spin.set(self.config.bleed)
         self.gutter_spin.set(self.config.gutter)
         self.mark_length_spin.set(self.config.mark_length)
+        self.quantity_spin.set(1)
         self.rotate_var.set(self.config.rotate_cards)
         self.crop_var.set(self.config.add_crop_marks)
         self.fit_var.set(self.config.fit_proportions)
