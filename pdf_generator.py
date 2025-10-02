@@ -6,6 +6,7 @@ import os
 import tempfile
 from layout_calculator import LayoutCalculator
 
+
 class PDFGenerator:
     def __init__(self, config):
         self.config = config
@@ -30,7 +31,9 @@ class PDFGenerator:
         )
 
         layout = calculator.calculate_layout()
-        if layout['cards_total'] == 0:
+
+        # ИСПРАВЛЕНО: обращение как к объекту, а не словарю
+        if layout.cards_total == 0:
             raise ValueError("Визитки не помещаются на лист")
 
         # Adjust back_images based on scheme
@@ -42,7 +45,8 @@ class PDFGenerator:
 
         c = canvas.Canvas(output_path, pagesize=(self.sheet_width * mm, self.sheet_height * mm))
 
-        cards_per_sheet = layout['cards_total']
+        # ИСПРАВЛЕНО: обращение как к объекту
+        cards_per_sheet = layout.cards_total
         total_sheets = (len(front_images) + cards_per_sheet - 1) // cards_per_sheet
 
         for sheet_num in range(total_sheets):
@@ -80,7 +84,8 @@ class PDFGenerator:
 
         temp_files = []
         try:
-            for i, pos in enumerate(layout['positions']):
+            # ИСПРАВЛЕНО: обращение как к объекту
+            for i, pos in enumerate(layout.positions):
                 if i >= len(images):
                     break
 
@@ -125,8 +130,6 @@ class PDFGenerator:
                     print(f"Ошибка обработки изображения {img_path}: {e}")
                     continue
 
-            # UPDATED: Removed text labels (side_name and "Сгенерировано...")
-
         finally:
             for temp_file in temp_files:
                 try:
@@ -138,7 +141,8 @@ class PDFGenerator:
         """Добавить обрезные метки для каждой визитки"""
         mark_length = self.mark_length * mm
 
-        for pos in layout['positions']:
+        # ИСПРАВЛЕНО: обращение как к объекту
+        for pos in layout.positions:
             bleed_mm = self.config.bleed * mm
             x = pos['x'] * mm + bleed_mm
             y = (self.sheet_height - pos['y']) * mm - bleed_mm

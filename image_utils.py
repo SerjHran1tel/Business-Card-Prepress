@@ -1,7 +1,9 @@
+# -*- coding: utf-8 -*-
+# image_utils.py
 from PIL import Image
 import os
 
-SUPPORTED_FORMATS = ('.jpg', '.jpeg', '.png', '.tiff', '.bmp', '.tif', '.webp')  # Пока только растр; PDF/EPS требуют доп. libs
+SUPPORTED_FORMATS = ('.jpg', '.jpeg', '.png', '.tiff', '.bmp', '.tif', '.webp')
 
 def get_image_info(filepath):
     """Получить информацию об изображении"""
