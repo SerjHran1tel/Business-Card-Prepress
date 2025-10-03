@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Business Card Maker{% endblock %}</title>
+
+    <!-- CSS -->
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/layout.css">
+    <link rel="stylesheet" href="/static/css/components.css">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/static/images/favicon.ico">
+
+    <!-- Meta tags -->
+    <meta name="description" content="Профессиональное веб-приложение для подготовки визиток к печати">
+    <meta name="keywords" content="визитки, печать, PDF, бизнес-карты">
+</head>
+<body>
+    <!-- Header -->
+    {% include "partials/header.html" %}
+
+    <!-- Main Content -->
+    <main class="main-container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    {% include "partials/footer.html" %}
+
+    <!-- JavaScript -->
+    <script src="/static/js/utils.js"></script>
+    <script src="/static/js/fileManager.js"></script>
+    <script src="/static/js/layoutCalculator.js"></script>
+    <script src="/static/js/pdfGenerator.js"></script>
+    <script src="/static/js/preview.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

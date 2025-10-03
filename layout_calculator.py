@@ -5,7 +5,6 @@ from core.models import LayoutResult
 
 logger = logging.getLogger(__name__)
 
-
 class LayoutCalculator:
     def __init__(self, sheet_width, sheet_height, card_width, card_height,
                  margin, bleed, gutter, rotate=False):
@@ -112,14 +111,14 @@ class LayoutCalculator:
             return self._get_empty_layout()
 
     def _get_empty_layout(self):
-        return {
-            'cards_x': 0,
-            'cards_y': 0,
-            'cards_total': 0,
-            'positions': [],
-            'rotated': False,
-            'efficiency': 0
-        }
+        return LayoutResult(
+            cards_x=0,
+            cards_y=0,
+            cards_total=0,
+            positions=[],
+            rotated=False,
+            efficiency=0
+        )
 
     def calculate_sheets_needed(self, total_cards):
         """Рассчитать количество листов"""

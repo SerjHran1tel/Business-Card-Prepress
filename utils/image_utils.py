@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
-# image_utils.py
+# utils/image_utils.py
 from PIL import Image, ImageCms
 import os
 import math
 import io
+import logging
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional
 
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ValidationResult:
@@ -17,9 +19,7 @@ class ValidationResult:
     color_issues: List[str]
     safe_zone_issues: List[str]
 
-
 SUPPORTED_FORMATS = ('.jpg', '.jpeg', '.png', '.tiff', '.bmp', '.tif', '.webp')
-
 
 def get_image_info(filepath):
     """Получить информацию об изображении"""
@@ -59,12 +59,12 @@ def get_image_info(filepath):
 
             return info
     except Exception as e:
+        logger.error(f"Error getting image info for {filepath}: {e}")
         return {
             'filename': os.path.basename(filepath),
             'error': str(e),
             'path': filepath
         }
-
 
 def scan_images(file_list_or_folder, scan_folder=False):
     """Просканировать список файлов или папку изображений"""
@@ -103,7 +103,6 @@ def scan_images(file_list_or_folder, scan_folder=False):
 
     return infos, errors
 
-
 def check_dpi_compliance(image_info, min_dpi=300):
     """Проверить соответствие DPI требованиям"""
     issues = []
@@ -124,7 +123,6 @@ def check_dpi_compliance(image_info, min_dpi=300):
 
     return issues
 
-
 def check_color_profile(image_info):
     """Проверить цветовой профиль"""
     issues = []
@@ -142,7 +140,6 @@ def check_color_profile(image_info):
         issues.append("Отсутствует цветовой профиль")
 
     return issues
-
 
 def validate_image_pairs(front_infos, back_infos, scheme='1:1', match_by_name=False):
     """Базовая проверка соответствия лицевых и оборотных сторон"""
@@ -183,7 +180,6 @@ def validate_image_pairs(front_infos, back_infos, scheme='1:1', match_by_name=Fa
                 warnings.append(f"Разный размер: {front['filename']} vs {back['filename']}")
 
     return errors, warnings
-
 
 def validate_image_pairs_extended(front_infos, back_infos, scheme='1:1', match_by_name=False,
                                   card_width=90, card_height=50, bleed=3, min_dpi=300):
@@ -256,7 +252,6 @@ def validate_image_pairs_extended(front_infos, back_infos, scheme='1:1', match_b
 
     return result
 
-
 def check_safe_zone_compliance(image_info, card_width, card_height, bleed, safe_zone_margin=5):
     """Проверить соответствие безопасной зоне"""
     issues = []
@@ -300,7 +295,6 @@ def check_safe_zone_compliance(image_info, card_width, card_height, bleed, safe_
         )
 
     return issues
-
 
 def generate_validation_report(validation_result: ValidationResult) -> str:
     """Сгенерировать детальный отчет о валидации"""

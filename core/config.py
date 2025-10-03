@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-# config.py
-import logging
+# core/config.py
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
+import logging
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +13,7 @@ SHEET_SIZES = {
     'A5': (148, 210),
     'SRA3': (305, 457),
     'Letter': (216, 279),
+    'Legal': (216, 356),
     'Произвольный': None
 }
 
@@ -21,6 +22,7 @@ CARD_SIZES = {
     'Стандартная (90×50)': (90, 50),
     'Евро (85×55)': (85, 55),
     'Квадратная (90×90)': (90, 90),
+    'Мини (70×40)': (70, 40),
     'Произвольный': None
 }
 
@@ -35,16 +37,15 @@ class PrintConfig:
     custom_card_height: int = 50
     margin: int = 5
     bleed: int = 3
-    gutter: int = 0
+    gutter: int = 2
     rotate_cards: bool = False
     add_crop_marks: bool = True
     mark_length: int = 5
-    mark_thickness: float = 0.1
+    mark_thickness: float = 0.3
     matching_scheme: str = '1:1'
     fit_proportions: bool = True
     match_by_name: bool = False
-    front_files: List[str] = field(default_factory=list)
-    back_files: List[str] = field(default_factory=list)
+    dpi: int = 300
 
     def get_sheet_dimensions(self) -> Tuple[int, int]:
         try:
@@ -67,3 +68,16 @@ class PrintConfig:
         except Exception as e:
             logger.error(f"Error getting card dimensions: {e}")
             return (90, 50)
+
+@dataclass
+class AppConfig:
+    app_name: str = "Business Card Maker"
+    version: str = "2.0.0"
+    debug: bool = True
+    max_upload_size: int = 100 * 1024 * 1024  # 100MB
+    allowed_extensions: List[str] = field(default_factory=lambda: [
+        '.jpg', '.jpeg', '.png', '.tiff', '.bmp', '.tif', '.webp', '.pdf', '.svg'
+    ])
+    temp_dir: str = "temp"
+    supported_vector_formats: List[str] = field(default_factory=lambda: ['.pdf', '.svg'])
+    session_timeout: int = 3600  # 1 hour

@@ -1,0 +1,138 @@
+<div class="card settings-panel">
+    <div class="card-header">
+        <h3>⚙️ Параметры печати</h3>
+    </div>
+
+    <div class="card-content">
+        <!-- Размер листа -->
+        <div class="form-group">
+            <label for="sheetSize">Размер листа:</label>
+            <select id="sheetSize" class="form-select" onchange="app.onSheetSizeChange()">
+                <option value="A4">A4 (210×297 мм)</option>
+                <option value="A3">A3 (297×420 мм)</option>
+                <option value="A5">A5 (148×210 мм)</option>
+                <option value="SRA3">SRA3 (305×457 мм)</option>
+                <option value="Letter">Letter (216×279 мм)</option>
+                <option value="Legal">Legal (216×356 мм)</option>
+                <option value="Произвольный">Произвольный размер</option>
+            </select>
+        </div>
+
+        <!-- Произвольный размер листа -->
+        <div id="customSheetContainer" class="form-row" style="display: none;">
+            <div class="form-group">
+                <label for="customSheetWidth">Ширина (мм):</label>
+                <input type="number" id="customSheetWidth" value="210" min="100" max="1000" class="form-input">
+            </div>
+            <div class="form-group">
+                <label for="customSheetHeight">Высота (мм):</label>
+                <input type="number" id="customSheetHeight" value="297" min="100" max="1000" class="form-input">
+            </div>
+        </div>
+
+        <!-- Размер визитки -->
+        <div class="form-group">
+            <label for="cardSize">Размер визитки:</label>
+            <select id="cardSize" class="form-select" onchange="app.onCardSizeChange()">
+                <option value="Стандартная (90×50)">Стандартная (90×50 мм)</option>
+                <option value="Евро (85×55)">Евро (85×55 мм)</option>
+                <option value="Квадратная (90×90)">Квадратная (90×90 мм)</option>
+                <option value="Мини (70×40)">Мини (70×40 мм)</option>
+                <option value="Произвольный">Произвольный размер</option>
+            </select>
+        </div>
+
+        <!-- Произвольный размер визитки -->
+        <div id="customCardContainer" class="form-row" style="display: none;">
+            <div class="form-group">
+                <label for="customCardWidth">Ширина (мм):</label>
+                <input type="number" id="customCardWidth" value="90" min="10" max="200" class="form-input">
+            </div>
+            <div class="form-group">
+                <label for="customCardHeight">Высота (мм):</label>
+                <input type="number" id="customCardHeight" value="50" min="10" max="200" class="form-input">
+            </div>
+        </div>
+
+        <!-- Основные параметры -->
+        <div class="form-row">
+            <div class="form-group">
+                <label for="margin">Поля (мм):</label>
+                <input type="number" id="margin" value="5" min="0" max="50" class="form-input">
+            </div>
+            <div class="form-group">
+                <label for="bleed">Вылет под обрез (мм):</label>
+                <input type="number" id="bleed" value="3" min="0" max="10" class="form-input">
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="gutter">Зазор между визитками (мм):</label>
+                <input type="number" id="gutter" value="2" min="0" max="20" class="form-input">
+            </div>
+            <div class="form-group">
+                <label for="dpi">Разрешение (DPI):</label>
+                <select id="dpi" class="form-select">
+                    <option value="150">150 DPI</option>
+                    <option value="300" selected>300 DPI</option>
+                    <option value="600">600 DPI</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Дополнительные настройки -->
+        <div class="form-group">
+            <label>Дополнительные опции:</label>
+            <div class="checkbox-group">
+                <label class="checkbox">
+                    <input type="checkbox" id="rotateCards">
+                    <span class="checkmark"></span>
+                    Поворачивать для экономии места
+                </label>
+                <label class="checkbox">
+                    <input type="checkbox" id="addCropMarks" checked>
+                    <span class="checkmark"></span>
+                    Добавлять обрезные метки
+                </label>
+                <label class="checkbox">
+                    <input type="checkbox" id="fitProportions" checked>
+                    <span class="checkmark"></span>
+                    Сохранять пропорции изображений
+                </label>
+                <label class="checkbox">
+                    <input type="checkbox" id="matchByName">
+                    <span class="checkmark"></span>
+                    Сопоставлять по именам файлов
+                </label>
+            </div>
+        </div>
+
+        <!-- Параметры обрезных меток -->
+        <div class="form-row">
+            <div class="form-group">
+                <label for="markLength">Длина меток (мм):</label>
+                <input type="number" id="markLength" value="5" min="1" max="20" class="form-input">
+            </div>
+            <div class="form-group">
+                <label for="markThickness">Толщина меток (мм):</label>
+                <input type="number" id="markThickness" value="0.3" min="0.1" max="2" step="0.1" class="form-input">
+            </div>
+        </div>
+
+        <!-- Кнопка генерации PDF -->
+        <div class="action-buttons">
+            <button class="btn btn-success" onclick="app.generatePDF()" style="width: 100%;">
+                📄 Сгенерировать PDF
+            </button>
+        </div>
+
+        <!-- Информация о раскладке -->
+        <div class="layout-info" id="layoutInfo">
+            <h4>Информация о раскладке</h4>
+            <div class="info-content" id="layoutInfoContent">
+                <p>Настройте параметры для расчета раскладки</p>
+            </div>
+        </div>
+    </div>
+</div>

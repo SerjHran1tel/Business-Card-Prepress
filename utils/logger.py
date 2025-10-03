@@ -2,37 +2,27 @@
 # utils/logger.py
 import logging
 import os
-import sys
 from datetime import datetime
 
 
-def setup_logging(log_dir=None, level=logging.INFO):
-    """
-    Настройка системы логирования
-    """
-    # Создаем логгер
-    logger = logging.getLogger()
-    logger.setLevel(level)
+def setup_logging(log_dir: str = "logs"):
+    """Настройка логирования"""
+    os.makedirs(log_dir, exist_ok=True)
 
-    # Форматтер для логов
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+    log_file = os.path.join(log_dir, f"business_card_maker_{datetime.now().strftime('%Y%m%d')}.log")
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file, encoding='utf-8'),
+            logging.StreamHandler()
+        ]
     )
 
-    # Обработчик для консоли
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+    # Уменьшаем логирование для некоторых библиотек
+    logging.getLogger('PIL').setLevel(logging.WARNING)
+    logging.getLogger('reportlab').setLevel(logging.WARNING)
+    logging.getLogger('fontTools').setLevel(logging.WARNING)
 
-    # Обработчик для файла (если указана директория)
-    if log_dir and os.path.exists(log_dir):
-        log_file = os.path.join(log_dir, f"prepress_app_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
-        file_handler = logging.FileHandler(log_file, encoding='utf-8')
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-
-        logger.info(f"Логирование в файл: {log_file}")
-
-    logger.info("Система логирования инициализирована")
-    return logger
+    return logging.getLogger(__name__)

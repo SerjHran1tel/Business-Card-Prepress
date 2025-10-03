@@ -6,14 +6,14 @@ import tempfile
 import logging
 from PIL import Image
 import io
+import asyncio
 
 logger = logging.getLogger(__name__)
 
 # Только форматы, которые можно конвертировать через Python библиотеки
-SUPPORTED_VECTOR_FORMATS = ('.pdf', '.svg')  # Убрали EPS, AI, CDR, WMF, EMF
+SUPPORTED_VECTOR_FORMATS = ('.pdf', '.svg')
 
-
-def convert_to_raster(filepath, dpi=300):
+async def convert_to_raster(filepath, dpi=300):
     """
     Конвертирует векторный файл во временный растровый PNG.
     Если формат не векторный, возвращает исходный путь.
@@ -25,16 +25,16 @@ def convert_to_raster(filepath, dpi=300):
         file_ext = os.path.splitext(filepath.lower())[1]
 
         # Создаем временный файл для сконвертированного изображения
-        temp_fd, temp_path = tempfile.mkstemp(suffix=".png")
+        temp_fd, temp_path = tempfile.mkstemp(suffix=".png", dir="temp/converted")
         os.close(temp_fd)
 
         success = False
         error_message = None
 
         if file_ext == '.pdf':
-            success, error_message = _convert_pdf(filepath, temp_path, dpi)
+            success, error_message = await _convert_pdf(filepath, temp_path, dpi)
         elif file_ext == '.svg':
-            success, error_message = _convert_svg(filepath, temp_path, dpi)
+            success, error_message = await _convert_svg(filepath, temp_path, dpi)
 
         if success:
             logger.info(f"Файл '{os.path.basename(filepath)}' успешно конвертирован в '{temp_path}'")
@@ -52,8 +52,7 @@ def convert_to_raster(filepath, dpi=300):
         logger.error(error_message)
         return filepath, error_message
 
-
-def _convert_pdf(filepath, output_path, dpi):
+async def _convert_pdf(filepath, output_path, dpi):
     """Конвертировать PDF в PNG через PyMuPDF"""
     try:
         doc = fitz.open(filepath)
@@ -67,12 +66,12 @@ def _convert_pdf(filepath, output_path, dpi):
     except Exception as e:
         return False, f"Ошибка конвертации PDF: {e}"
 
-
-def _convert_svg(filepath, output_path, dpi):
+async def _convert_svg(filepath, output_path, dpi):
     """Конвертировать SVG в PNG через CairoSVG"""
     try:
         import cairosvg
-        cairosvg.svg2png(url=filepath, write_to=output_path, dpi=dpi)
+        # Используем asyncio.to_thread для выполнения синхронной операции в отдельном потоке
+        await asyncio.to_thread(cairosvg.svg2png, url=filepath, write_to=output_path, dpi=dpi)
         if os.path.exists(output_path):
             return True, None
         else:
@@ -81,7 +80,6 @@ def _convert_svg(filepath, output_path, dpi):
         return False, "Для конвертации SVG установите: pip install cairosvg"
     except Exception as e:
         return False, f"Ошибка конвертации SVG: {e}"
-
 
 def check_conversion_dependencies():
     """Проверить доступные Python библиотеки для конвертации"""
