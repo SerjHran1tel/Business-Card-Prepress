@@ -393,6 +393,36 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
+
+        .progress-container {
+            margin: 20px 0;
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            border: 2px solid #e9ecef;
+        }
+
+        .progress-bar {
+            height: 20px;
+            background: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+
+        .progress-text {
+            text-align: center;
+            font-weight: 600;
+            color: #495057;
+        }
     </style>
 </head>
 <body>
@@ -517,6 +547,25 @@
                     </div>
                 </div>
 
+                <div class="grid">
+                    <div class="form-group">
+                        <label for="dpi">Разрешение изображений (DPI)</label>
+                        <input type="number" id="dpi" value="300" min="72" max="600" step="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="outputDpi">Разрешение PDF (DPI)</label>
+                        <input type="number" id="outputDpi" value="300" min="150" max="1200" step="1">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="colorMode">Цветовой режим</label>
+                    <select id="colorMode">
+                        <option value="rgb">RGB (для цифровой печати)</option>
+                        <option value="cmyk">CMYK (для офсетной печати)</option>
+                    </select>
+                </div>
+
                 <div class="form-group">
                     <div class="checkbox-group">
                         <input type="checkbox" id="cropMarks" checked>
@@ -546,6 +595,14 @@
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <!-- Прогресс обработки -->
+            <div id="progressContainer" class="progress-container hidden">
+                <div class="progress-bar">
+                    <div id="progressFill" class="progress-fill"></div>
+                </div>
+                <div id="progressText" class="progress-text">Инициализация...</div>
             </div>
 
             <!-- Сообщения -->
@@ -652,9 +709,34 @@
             }, 10000);
         }
 
+        function safeShowMessage(validationReport, type = 'success') {
+            let message = '';
+
+            if (validationReport && typeof validationReport === 'string') {
+                message = validationReport.replace(/\n/g, '<br>');
+            } else {
+                message = 'PDF успешно создан!';
+            }
+
+            showMessage(`
+                <strong>✅ PDF успешно создан!</strong><br>
+                ${message}
+            `, type);
+        }
+
         function showLoader(show) {
             document.getElementById('loader').style.display = show ? 'block' : 'none';
             document.getElementById('processBtn').disabled = show;
+        }
+
+        function updateProgress(progress, message) {
+            const progressContainer = document.getElementById('progressContainer');
+            const progressFill = document.getElementById('progressFill');
+            const progressText = document.getElementById('progressText');
+
+            progressContainer.classList.remove('hidden');
+            progressFill.style.width = `${progress}%`;
+            progressText.textContent = `${message} (${progress}%)`;
         }
 
         async function generatePreview() {
@@ -792,6 +874,9 @@
                 margin_right: document.getElementById('marginRight').value,
                 bleed: document.getElementById('bleed').value,
                 gap: document.getElementById('gap').value,
+                dpi: document.getElementById('dpi').value,
+                output_dpi: document.getElementById('outputDpi').value,
+                color_mode: document.getElementById('colorMode').value,
                 crop_marks: document.getElementById('cropMarks').checked,
                 matching_mode: document.getElementById('matchingMode').value,
                 strict_matching: document.getElementById('strictMatching').checked,
@@ -846,21 +931,54 @@
                 const processResult = await processResponse.json();
 
                 if (processResponse.ok) {
-                    downloadUrl = processResult.download_url;
-                    showMessage(`
-                        <strong>✅ PDF успешно создан!</strong><br>
-                        ${processResult.validation_report.replace(/\n/g, '<br>')}
-                    `, 'success');
-                    document.getElementById('downloadBtn').classList.remove('hidden');
+                    // Запускаем отслеживание прогресса
+                    trackProgress();
                 } else {
                     throw new Error(processResult.error + (processResult.details ? '\n' + processResult.details : ''));
                 }
 
             } catch (error) {
                 showMessage(`Ошибка: ${error.message}`, 'error');
-            } finally {
                 showLoader(false);
             }
+        }
+
+        // Новая функция для отслеживания прогресса
+        function trackProgress() {
+            const progressInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/progress/${sessionId}`);
+                    const progressData = await response.json();
+
+                    if (progressData.error) {
+                        clearInterval(progressInterval);
+                        showMessage(`Ошибка: ${progressData.error}`, 'error');
+                        showLoader(false);
+                        document.getElementById('progressContainer').classList.add('hidden');
+                        return;
+                    }
+
+                    if (progressData.progress) {
+                        updateProgress(progressData.progress, progressData.message);
+                    }
+
+                    if (progressData.progress === 100) {
+                        clearInterval(progressInterval);
+
+                        safeShowMessage(progressData.validation_report, 'success');
+
+                        downloadUrl = progressData.download_url;
+                        document.getElementById('downloadBtn').classList.remove('hidden');
+                        document.getElementById('progressContainer').classList.add('hidden');
+                        showLoader(false);
+                    }
+                } catch (error) {
+                    clearInterval(progressInterval);
+                    showMessage(`Ошибка отслеживания прогресса: ${error.message}`, 'error');
+                    showLoader(false);
+                    document.getElementById('progressContainer').classList.add('hidden');
+                }
+            }, 1000); // Проверяем каждую секунду
         }
 
         function downloadFile() {

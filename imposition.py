@@ -9,12 +9,36 @@ from dataclasses import dataclass
 from enum import Enum
 import json
 import re
+import logging
+import tempfile
+from io import BytesIO
 
-from PIL import Image
+from PIL import Image, ImageCms
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from PyPDF2 import PdfReader, PdfWriter
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+try:
+    from pdf2image import convert_from_path
+    PDF_SUPPORT = True
+except ImportError:
+    PDF_SUPPORT = False
+    logger.warning("pdf2image не установлен, PDF превью недоступно")
+
+try:
+    import fitz  # PyMuPDF
+    PYPDF2_SUPPORT = True
+except ImportError:
+    PYPDF2_SUPPORT = False
+    logger.warning("PyMuPDF не установлен, используем базовую обработку PDF")
 
 
 class Orientation(Enum):
@@ -29,6 +53,12 @@ class MatchingMode(Enum):
     ONE_TO_ONE = "one_to_one"
     ONE_TO_MANY = "one_to_many"
     MANY_TO_MANY = "many_to_many"
+
+
+class ColorMode(Enum):
+    """Цветовые режимы"""
+    RGB = "rgb"
+    CMYK = "cmyk"
 
 
 @dataclass
@@ -87,7 +117,10 @@ class PrintSettings:
     crop_mark_offset: float = 2.0  # мм
     orientation: Orientation = Orientation.AUTO
     matching_mode: MatchingMode = MatchingMode.ONE_TO_ONE
-    strict_name_matching: bool = True  # Строгое совпадение имен файлов
+    strict_name_matching: bool = True
+    dpi: int = 300  # Разрешение для растровых изображений
+    color_mode: ColorMode = ColorMode.RGB  # Цветовой режим
+    output_dpi: int = 300  # Разрешение выходного PDF
 
 
 class ValidationResult:
@@ -100,9 +133,11 @@ class ValidationResult:
     def add_error(self, message: str):
         self.errors.append(message)
         self.is_valid = False
+        logger.error(f"Validation error: {message}")
 
     def add_warning(self, message: str):
         self.warnings.append(message)
+        logger.warning(f"Validation warning: {message}")
 
     def get_report(self) -> str:
         report = []
@@ -125,6 +160,45 @@ class FileManager:
     SUPPORTED_FORMATS = {'.pdf', '.jpg', '.jpeg', '.png', '.tiff', '.tif', '.eps'}
 
     @staticmethod
+    def validate_file(file_path: Path) -> Tuple[bool, str]:
+        """Проверка целостности файла"""
+        try:
+            if not file_path.exists():
+                return False, "Файл не существует"
+
+            # Проверка размера файла
+            file_size = file_path.stat().st_size
+            if file_size == 0:
+                return False, "Файл пустой"
+            if file_size > 100 * 1024 * 1024:  # 100MB
+                return False, "Файл слишком большой (>100MB)"
+
+            # Проверка формата
+            if file_path.suffix.lower() not in FileManager.SUPPORTED_FORMATS:
+                return False, f"Неподдерживаемый формат: {file_path.suffix}"
+
+            # Проверка содержимого
+            if file_path.suffix.lower() == '.pdf':
+                if PYPDF2_SUPPORT:
+                    try:
+                        doc = fitz.open(str(file_path))
+                        if len(doc) == 0:
+                            return False, "PDF файл поврежден"
+                        doc.close()
+                    except Exception as e:
+                        return False, f"Ошибка чтения PDF: {str(e)}"
+            else:
+                try:
+                    with Image.open(file_path) as img:
+                        img.verify()  # Проверка целостности
+                except Exception as e:
+                    return False, f"Изображение повреждено: {str(e)}"
+
+            return True, "OK"
+        except Exception as e:
+            return False, f"Ошибка валидации: {str(e)}"
+
+    @staticmethod
     def scan_directory(directory: Path) -> List[Path]:
         """Сканирование директории на наличие поддерживаемых файлов"""
         if not directory.exists():
@@ -133,15 +207,17 @@ class FileManager:
         files = []
         for file in sorted(directory.iterdir()):
             if file.suffix.lower() in FileManager.SUPPORTED_FORMATS:
-                files.append(file)
+                is_valid, message = FileManager.validate_file(file)
+                if is_valid:
+                    files.append(file)
+                else:
+                    logger.warning(f"Пропущен поврежденный файл {file.name}: {message}")
         return files
 
     @staticmethod
     def normalize_filename(filename: str) -> str:
         """Нормализация имени файла для сравнения"""
-        # Убираем расширение и приводим к нижнему регистру
         name = Path(filename).stem.lower()
-        # Убираем спецсимволы и пробелы
         name = re.sub(r'[^\w]', '', name)
         return name
 
@@ -155,29 +231,23 @@ class FileManager:
         matches = {}
 
         if strict:
-            # Строгое совпадение по именам
             back_dict = {f.stem: f for f in back_files}
             for front_file in front_files:
                 matches[front_file] = back_dict.get(front_file.stem)
         else:
-            # Нестрогое совпадение
             if len(back_files) == 0:
-                # Если нет оборотных файлов, возвращаем None для всех лицевых
                 for front_file in front_files:
                     matches[front_file] = None
             elif len(front_files) == len(back_files):
-                # Если количество файлов совпадает, сопоставляем по порядку
                 for front_file, back_file in zip(front_files, back_files):
                     matches[front_file] = back_file
             else:
-                # Пытаемся сопоставить по нормализованным именам
                 back_dict = {FileManager.normalize_filename(f.name): f for f in back_files}
                 for front_file in front_files:
                     normalized = FileManager.normalize_filename(front_file.name)
                     matches[front_file] = back_dict.get(normalized)
-                    # Если не найдено совпадение, пытаемся найти ближайший файл
                     if matches[front_file] is None and back_files:
-                        matches[front_file] = back_files[0]  # Берем первый доступный оборот
+                        matches[front_file] = back_files[0]
 
         return matches
 
@@ -197,6 +267,12 @@ class FileManager:
             result.add_error(f"Не найдено файлов в директории: {front_dir}")
             return result
 
+        # Проверка каждого файла
+        for file in front_files:
+            is_valid, message = FileManager.validate_file(file)
+            if not is_valid:
+                result.add_error(f"Лицевая сторона {file.name}: {message}")
+
         if matching_mode == MatchingMode.ONE_TO_ONE:
             if not back_dir.exists():
                 result.add_error(f"Директория оборотных сторон не найдена: {back_dir}")
@@ -207,7 +283,12 @@ class FileManager:
                 result.add_error(f"Не найдено файлов в директории: {back_dir}")
                 return result
 
-            # Сопоставление файлов
+            # Проверка каждого файла
+            for file in back_files:
+                is_valid, message = FileManager.validate_file(file)
+                if not is_valid:
+                    result.add_error(f"Оборотная сторона {file.name}: {message}")
+
             matches = FileManager.match_files(front_files, back_files, strict_matching)
 
             missing_backs = [f.name for f, b in matches.items() if b is None]
@@ -237,6 +318,73 @@ class FileManager:
         return result
 
 
+class ImageProcessor:
+    """Обработчик изображений с поддержкой CMYK и DPI"""
+
+    @staticmethod
+    def convert_to_cmyk(image: Image.Image) -> Image.Image:
+        """Конвертация изображения в CMYK"""
+        try:
+            # Создаем CMYK профиль (условный, для печати)
+            cmyk_profile = ImageCms.createProfile("sRGB")
+            return ImageCms.profileToProfile(image, cmyk_profile, cmyk_profile, outputMode='CMYK')
+        except Exception as e:
+            logger.warning(f"Не удалось конвертировать в CMYK: {e}")
+            return image.convert('CMYK')
+
+    @staticmethod
+    def process_image_for_print(image_path: Path, settings: PrintSettings,
+                               target_size: Tuple[float, float]) -> ImageReader:
+        """Обработка изображения для печати с учетом DPI и цветового режима"""
+        try:
+            if image_path.suffix.lower() == '.pdf':
+                # Обработка PDF
+                if PDF_SUPPORT:
+                    images = convert_from_path(
+                        str(image_path),
+                        dpi=settings.dpi,
+                        first_page=1,
+                        last_page=1
+                    )
+                    if images:
+                        img = images[0]
+                    else:
+                        raise Exception("Не удалось конвертировать PDF")
+                else:
+                    raise Exception("PDF поддержка не установлена")
+            else:
+                img = Image.open(image_path)
+
+            # Конвертация в CMYK если нужно
+            if settings.color_mode == ColorMode.CMYK:
+                img = ImageProcessor.convert_to_cmyk(img)
+
+            # Масштабирование с учетом DPI
+            target_width_px = int(target_size[0] * settings.dpi / 25.4)  # мм в пиксели
+            target_height_px = int(target_size[1] * settings.dpi / 25.4)
+
+            img.thumbnail((target_width_px, target_height_px), Image.Resampling.LANCZOS)
+
+            # Сохраняем во временный буфер
+            buffer = BytesIO()
+            if settings.color_mode == ColorMode.CMYK:
+                img.save(buffer, format='TIFF', dpi=(settings.dpi, settings.dpi))
+            else:
+                img.save(buffer, format='PNG', dpi=(settings.dpi, settings.dpi))
+
+            buffer.seek(0)
+            return ImageReader(buffer)
+
+        except Exception as e:
+            logger.error(f"Ошибка обработки изображения {image_path}: {e}")
+            # Создаем заглушку
+            buffer = BytesIO()
+            placeholder = Image.new('RGB', (100, 100), color='lightgray')
+            placeholder.save(buffer, format='PNG')
+            buffer.seek(0)
+            return ImageReader(buffer)
+
+
 class LayoutCalculator:
     """Расчет раскладки визиток на листе"""
 
@@ -246,27 +394,28 @@ class LayoutCalculator:
         Рассчитывает количество визиток по горизонтали и вертикали
         Возвращает: (cols, rows, x_offset, y_offset)
         """
-        # Доступная область с учетом полей
         available_width = (settings.page_format.width -
                           settings.margin_left - settings.margin_right)
         available_height = (settings.page_format.height -
                            settings.margin_top - settings.margin_bottom)
 
-        # Размер визитки с учетом вылетов и зазоров
         card_width = settings.card_size.width + settings.gap
         card_height = settings.card_size.height + settings.gap
 
-        # Количество визиток
         cols = int(available_width // card_width)
         rows = int(available_height // card_height)
 
-        # Центрирование
+        # Минимум 1 визитка на листе
+        cols = max(1, cols)
+        rows = max(1, rows)
+
         total_cards_width = cols * card_width - settings.gap
         total_cards_height = rows * card_height - settings.gap
 
         x_offset = settings.margin_left + (available_width - total_cards_width) / 2
         y_offset = settings.margin_bottom + (available_height - total_cards_height) / 2
 
+        logger.info(f"Раскладка: {cols}x{rows} визиток, offset: ({x_offset:.1f}, {y_offset:.1f})")
         return cols, rows, x_offset, y_offset
 
 
@@ -277,11 +426,22 @@ class PDFGenerator:
         self.settings = settings
         self.cols, self.rows, self.x_offset, self.y_offset = \
             LayoutCalculator.calculate_layout(settings)
+        self.temp_files = []  # Для очистки временных файлов
+
+    def __del__(self):
+        """Очистка временных файлов"""
+        for temp_file in self.temp_files:
+            try:
+                if Path(temp_file).exists():
+                    Path(temp_file).unlink()
+            except:
+                pass
 
     def create_imposition(self, front_cards: List[CardQuantity],
                          back_cards: Optional[List[CardQuantity]],
                          output_path: Path) -> bool:
         """Создание PDF с раскладкой"""
+        logger.info(f"Начало создания PDF: {output_path}")
         try:
             # Разворачиваем список с учетом количества
             front_files = []
@@ -297,9 +457,16 @@ class PDFGenerator:
             cards_per_sheet = self.cols * self.rows
             total_sheets = (len(front_files) + cards_per_sheet - 1) // cards_per_sheet
 
-            # Создаем временные PDF для лицевой и оборотной сторон
-            temp_front = output_path.parent / f"temp_front_{output_path.stem}.pdf"
-            temp_back = output_path.parent / f"temp_back_{output_path.stem}.pdf"
+            logger.info(f"Всего визиток: {len(front_files)}, листов: {total_sheets}")
+
+            # Создаем временные PDF
+            with tempfile.NamedTemporaryFile(suffix='_front.pdf', delete=False) as f:
+                temp_front = Path(f.name)
+                self.temp_files.append(temp_front)
+
+            with tempfile.NamedTemporaryFile(suffix='_back.pdf', delete=False) as f:
+                temp_back = Path(f.name)
+                self.temp_files.append(temp_back)
 
             # Генерируем лицевую сторону
             self._generate_side(front_files, temp_front, "Лицевая сторона")
@@ -311,30 +478,29 @@ class PDFGenerator:
                 self._generate_single_back(back_files[0], len(front_files),
                                           temp_back, "Оборотная сторона")
 
-            # Объединяем в финальный PDF (чередуя лицо и оборот)
+            # Объединяем в финальный PDF
             self._merge_front_back(temp_front, temp_back if back_files else None,
                                   output_path)
 
-            # Удаляем временные файлы
-            if temp_front.exists():
-                temp_front.unlink()
-            if temp_back.exists():
-                temp_back.unlink()
-
+            logger.info(f"PDF успешно создан: {output_path}")
             return True
+
         except Exception as e:
-            print(f"Ошибка при создании PDF: {e}")
+            logger.error(f"Ошибка при создании PDF: {e}")
             import traceback
             traceback.print_exc()
             return False
 
     def _generate_side(self, files: List[Path], output: Path,
                        title: str, flip: bool = False):
-        """Генерация одной стороны (лицевой или оборотной)"""
+        """Генерация одной стороны"""
+        logger.info(f"Генерация {title}, файлов: {len(files)}")
+
         page_width = self.settings.page_format.width * mm
         page_height = self.settings.page_format.height * mm
 
         c = canvas.Canvas(str(output), pagesize=(page_width, page_height))
+        c.setTitle(title)
 
         cards_per_sheet = self.cols * self.rows
 
@@ -343,13 +509,13 @@ class PDFGenerator:
             end_idx = min(start_idx + cards_per_sheet, len(files))
             sheet_files = files[start_idx:end_idx]
 
-            # Рисуем визитки на листе
+            logger.info(f"Лист {sheet_idx + 1}: визитки {start_idx + 1}-{end_idx}")
+
             for idx, file in enumerate(sheet_files):
                 row = idx // self.cols
                 col = idx % self.cols
 
                 if flip:
-                    # Для оборотной стороны зеркалим по горизонтали
                     col = self.cols - 1 - col
 
                 x = (self.x_offset + col * (self.settings.card_size.width +
@@ -368,11 +534,14 @@ class PDFGenerator:
 
     def _generate_single_back(self, back_file: Path, count: int,
                              output: Path, title: str):
-        """Генерация оборотной стороны с одним изображением для всех"""
+        """Генерация оборотной стороны с одним изображением"""
+        logger.info(f"Генерация единого оборота для {count} визиток")
+
         page_width = self.settings.page_format.width * mm
         page_height = self.settings.page_format.height * mm
 
         c = canvas.Canvas(str(output), pagesize=(page_width, page_height))
+        c.setTitle(title)
 
         cards_per_sheet = self.cols * self.rows
         total_sheets = (count + cards_per_sheet - 1) // cards_per_sheet
@@ -383,7 +552,7 @@ class PDFGenerator:
 
             for idx in range(remaining):
                 row = idx // self.cols
-                col = self.cols - 1 - (idx % self.cols)  # Зеркалим
+                col = self.cols - 1 - (idx % self.cols)
 
                 x = (self.x_offset + col * (self.settings.card_size.width +
                      self.settings.gap)) * mm
@@ -400,28 +569,23 @@ class PDFGenerator:
         c.save()
 
     def _draw_card(self, c: canvas.Canvas, image_path: Path, x: float, y: float):
-        """Отрисовка одной визитки"""
+        """Отрисовка одной визитки с улучшенной обработкой"""
         card_width = self.settings.card_size.width * mm
         card_height = self.settings.card_size.height * mm
 
         try:
-            if image_path.suffix.lower() == '.pdf':
-                # Для PDF используем первую страницу
-                reader = PdfReader(str(image_path))
-                # PDF требует специальной обработки, пока рисуем заглушку
-                c.setFillColorRGB(0.9, 0.9, 0.9)
-                c.rect(x, y, card_width, card_height, fill=1)
-                c.setFillColorRGB(0, 0, 0)
-                c.setFont("Helvetica", 8)
-                c.drawString(x + 5, y + card_height / 2, f"PDF: {image_path.name}")
-            else:
-                # Для растровых изображений
-                img = Image.open(image_path)
-                img_reader = ImageReader(img)
-                c.drawImage(img_reader, x, y, width=card_width, height=card_height,
-                           preserveAspectRatio=True, mask='auto')
+            # Используем улучшенный процессор изображений
+            target_size = (self.settings.card_size.width, self.settings.card_size.height)
+            img_reader = ImageProcessor.process_image_for_print(
+                image_path, self.settings, target_size
+            )
+
+            c.drawImage(img_reader, x, y, width=card_width, height=card_height,
+                       preserveAspectRatio=True, mask='auto')
+
         except Exception as e:
-            # В случае ошибки рисуем заглушку
+            logger.error(f"Ошибка отрисовки визитки {image_path}: {e}")
+            # Заглушка с ошибкой
             c.setFillColorRGB(0.95, 0.95, 0.95)
             c.rect(x, y, card_width, card_height, fill=1)
             c.setFillColorRGB(1, 0, 0)
@@ -459,27 +623,29 @@ class PDFGenerator:
     def _merge_front_back(self, front_pdf: Path, back_pdf: Optional[Path],
                          output: Path):
         """Объединение лицевой и оборотной сторон"""
-        writer = PdfWriter()
-        front_reader = PdfReader(str(front_pdf))
+        try:
+            writer = PdfWriter()
+            front_reader = PdfReader(str(front_pdf))
 
-        if back_pdf and back_pdf.exists():
-            back_reader = PdfReader(str(back_pdf))
+            if back_pdf and back_pdf.exists():
+                back_reader = PdfReader(str(back_pdf))
+                max_pages = max(len(front_reader.pages), len(back_reader.pages))
 
-            # Чередуем страницы: лицо, оборот, лицо, оборот...
-            max_pages = max(len(front_reader.pages), len(back_reader.pages))
+                for i in range(max_pages):
+                    if i < len(front_reader.pages):
+                        writer.add_page(front_reader.pages[i])
+                    if i < len(back_reader.pages):
+                        writer.add_page(back_reader.pages[i])
+            else:
+                for page in front_reader.pages:
+                    writer.add_page(page)
 
-            for i in range(max_pages):
-                if i < len(front_reader.pages):
-                    writer.add_page(front_reader.pages[i])
-                if i < len(back_reader.pages):
-                    writer.add_page(back_reader.pages[i])
-        else:
-            # Только лицевая сторона
-            for page in front_reader.pages:
-                writer.add_page(page)
+            with open(output, 'wb') as f:
+                writer.write(f)
 
-        with open(output, 'wb') as f:
-            writer.write(f)
+        except Exception as e:
+            logger.error(f"Ошибка объединения PDF: {e}")
+            raise
 
     def get_preview_data(self) -> Dict:
         """Получение данных для предпросмотра"""
@@ -505,21 +671,24 @@ class ImpositionApp:
             page_format=PageFormat.get_standard_formats()['A4'],
             card_size=CardSize.get_standard_sizes()['Standard RU']
         )
+        self.logger = logging.getLogger(__name__)
 
     def process(self, front_cards: List[CardQuantity],
                 back_cards: Optional[List[CardQuantity]],
                 output_file: str) -> bool:
         """Основной процесс обработки"""
-        output_path = Path(output_file)
+        self.logger.info(f"Начало обработки, выходной файл: {output_file}")
 
-        print(f"\nГенерация PDF: {output_path}")
+        output_path = Path(output_file)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
         generator = PDFGenerator(self.settings)
         success = generator.create_imposition(front_cards, back_cards, output_path)
 
         if success:
-            print(f"✅ PDF успешно создан: {output_path}")
+            self.logger.info(f"✅ PDF успешно создан: {output_path}")
         else:
-            print("❌ Ошибка при создании PDF")
+            self.logger.error("❌ Ошибка при создании PDF")
 
         return success
 
@@ -544,12 +713,17 @@ class ImpositionApp:
             'bleed': self.settings.bleed,
             'gap': self.settings.gap,
             'crop_marks': self.settings.crop_marks,
+            'dpi': self.settings.dpi,
+            'output_dpi': self.settings.output_dpi,
+            'color_mode': self.settings.color_mode.value,
             'matching_mode': self.settings.matching_mode.value,
             'strict_name_matching': self.settings.strict_name_matching
         }
 
         with open(config_file, 'w', encoding='utf-8') as f:
             json.dump(config, f, indent=2, ensure_ascii=False)
+
+        self.logger.info(f"Конфигурация сохранена: {config_file}")
 
     def load_config(self, config_file: str):
         """Загрузка конфигурации"""
@@ -565,8 +739,13 @@ class ImpositionApp:
         self.settings.bleed = config['bleed']
         self.settings.gap = config['gap']
         self.settings.crop_marks = config['crop_marks']
+        self.settings.dpi = config.get('dpi', 300)
+        self.settings.output_dpi = config.get('output_dpi', 300)
+        self.settings.color_mode = ColorMode(config.get('color_mode', 'rgb'))
         self.settings.matching_mode = MatchingMode(config['matching_mode'])
         self.settings.strict_name_matching = config.get('strict_name_matching', True)
+
+        self.logger.info(f"Конфигурация загружена: {config_file}")
 
 
 if __name__ == "__main__":
@@ -578,6 +757,8 @@ if __name__ == "__main__":
     app.settings.card_size = CardSize.get_standard_sizes()['Standard RU']
     app.settings.matching_mode = MatchingMode.ONE_TO_ONE
     app.settings.strict_name_matching = False
+    app.settings.dpi = 300
+    app.settings.color_mode = ColorMode.RGB
 
     # Создание списка визиток с количеством
     front_cards = [
