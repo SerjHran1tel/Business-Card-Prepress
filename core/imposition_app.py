@@ -11,7 +11,6 @@ from .pdf_generator import PDFGenerator
 
 logger = logging.getLogger(__name__)
 
-
 class ImpositionApp:
     def __init__(self):
         self.settings = PrintSettings(

@@ -5,23 +5,65 @@ import tempfile
 import logging
 from pathlib import Path
 from typing import List, Optional
+from copy import deepcopy
 
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
 from PyPDF2 import PdfReader, PdfWriter
 
-from .models import PrintSettings, CardQuantity
+from .models import PrintSettings, CardQuantity, Orientation, PageFormat
 from .layout_calculator import LayoutCalculator
 
 logger = logging.getLogger(__name__)
 
-
 class PDFGenerator:
     def __init__(self, settings: PrintSettings):
-        self.settings = settings
+        self.settings = self._apply_orientation(settings)
         self.cols, self.rows, self.x_offset, self.y_offset = \
-            LayoutCalculator.calculate_layout(settings)
+            LayoutCalculator.calculate_layout(self.settings)
         self.temp_files = []
+
+    def _apply_orientation(self, settings: PrintSettings) -> PrintSettings:
+        portrait_page = PageFormat(
+            settings.page_format.name,
+            settings.page_format.width,
+            settings.page_format.height
+        )
+        landscape_page = PageFormat(
+            settings.page_format.name,
+            settings.page_format.height,
+            settings.page_format.width
+        )
+
+        if settings.orientation == Orientation.LANDSCAPE:
+            new_settings = deepcopy(settings)
+            new_settings.page_format = landscape_page
+            logger.info("Принудительный выбор: Landscape")
+            return new_settings
+        elif settings.orientation == Orientation.PORTRAIT:
+            new_settings = deepcopy(settings)
+            new_settings.page_format = portrait_page
+            logger.info("Принудительный выбор: Portrait")
+            return new_settings
+        else:  # AUTO
+            # Portrait
+            portrait_settings = deepcopy(settings)
+            portrait_settings.page_format = portrait_page
+            p_cols, p_rows, _, _ = LayoutCalculator.calculate_layout(portrait_settings)
+            p_cards = p_cols * p_rows
+
+            # Landscape
+            landscape_settings = deepcopy(settings)
+            landscape_settings.page_format = landscape_page
+            l_cols, l_rows, _, _ = LayoutCalculator.calculate_layout(landscape_settings)
+            l_cards = l_cols * l_rows
+
+            if l_cards > p_cards:
+                logger.info("Автоматический выбор: Landscape (больше визиток на листе)")
+                return landscape_settings
+            else:
+                logger.info("Автоматический выбор: Portrait")
+                return portrait_settings
 
     def __del__(self):
         for temp_file in self.temp_files:
